@@ -71,10 +71,8 @@ public class RaidNodeMetrics implements Updater {
   public static final String blockMoveScheduledMetric = "block_move_scheduled";
   // Number of skipped block move
   public static final String blockMoveSkippedMetric = "block_move_skipped";
-  // Number of RS blocks which are misplaced
-  public static final String misplacedRsMetricsHeader = "misplaced_rs";
-  // Number of XOR blocks which are misplaced
-  public static final String misplacedXorMetricsHeader = "misplaced_xor";
+  // Number of blocks which are misplaced
+  public static final String misplacedMetricHeader = "misplaced";
   // Number of corrupt files being fixed with high priority
   public static final String corruptFilesHighPriMetric = "corrupt_files_high_pri";
   // Number of corrupt files being fixed with low priority
@@ -83,6 +81,8 @@ public class RaidNodeMetrics implements Updater {
   public static final String decomFilesLowPriMetric = "decom_files_low_pri";
   // Number of files being copied off decommissioning hosts  with lowest priority
   public static final String decomFilesLowestPriMetric = "decom_files_lowest_pri";
+  // Monitor number of misplaced blocks in a stripe
+  public static final int MAX_MONITORED_MISPLACED_BLOCKS = 5;
   
   MetricsContext context;
   private MetricsRecord metricsRecord;
@@ -117,22 +117,21 @@ public class RaidNodeMetrics implements Updater {
     new MetricsTimeVaryingLong(blockMoveScheduledMetric, registry);
   MetricsTimeVaryingLong blockMoveSkipped =
     new MetricsTimeVaryingLong(blockMoveSkippedMetric, registry);
-  MetricsLongValue misplacedRs[];
-  MetricsLongValue misplacedXor[];
+  Map<String, Map<Integer, MetricsLongValue>> codecToMisplacedBlocks;
 
-  Map<ErasureCodeType, Map<RaidState, MetricsLongValue>> sourceFiles;
-  Map<ErasureCodeType, Map<RaidState, MetricsLongValue>> sourceBlocks;
-  Map<ErasureCodeType, Map<RaidState, MetricsLongValue>> sourceBytes;
-  Map<ErasureCodeType, Map<RaidState, MetricsLongValue>> sourceLogical;
-  Map<ErasureCodeType, MetricsLongValue> parityFiles;
-  Map<ErasureCodeType, MetricsLongValue> parityBlocks;
-  Map<ErasureCodeType, MetricsLongValue> parityBytes;
-  Map<ErasureCodeType, MetricsLongValue> parityLogical;
+  Map<String, Map<RaidState, MetricsLongValue>> sourceFiles;
+  Map<String, Map<RaidState, MetricsLongValue>> sourceBlocks;
+  Map<String, Map<RaidState, MetricsLongValue>> sourceBytes;
+  Map<String, Map<RaidState, MetricsLongValue>> sourceLogical;
+  Map<String, MetricsLongValue> parityFiles;
+  Map<String, MetricsLongValue> parityBlocks;
+  Map<String, MetricsLongValue> parityBytes;
+  Map<String, MetricsLongValue> parityLogical;
   MetricsLongValue effectiveReplicationTimes1000 =
       new MetricsLongValue("effective_replication_1000", registry);
   MetricsLongValue saving = new MetricsLongValue("saving", registry);
-  Map<ErasureCodeType, MetricsLongValue> savingForCode =
-    new HashMap<ErasureCodeType, MetricsLongValue>();
+  Map<String, MetricsLongValue> savingForCode =
+    new HashMap<String, MetricsLongValue>();
 
   MetricsLongValue corruptFilesHighPri =
       new MetricsLongValue(corruptFilesHighPriMetric, registry);
@@ -166,14 +165,14 @@ public class RaidNodeMetrics implements Updater {
   }
 
   private void initPlacementMetrics() {
-    final int MAX_MONITORED_MISPLACED_BLOCKS = 5;
-    misplacedRs = new MetricsLongValue[MAX_MONITORED_MISPLACED_BLOCKS];
-    misplacedXor = new MetricsLongValue[MAX_MONITORED_MISPLACED_BLOCKS];
-    for (int i = 0; i < misplacedRs.length; ++i) {
-      misplacedRs[i] = new MetricsLongValue(misplacedRsMetricsHeader + "_" + i, registry);
-    }
-    for (int i = 0; i < misplacedXor.length; ++i) {
-      misplacedXor[i] = new MetricsLongValue(misplacedXorMetricsHeader + "_" + i, registry);
+    codecToMisplacedBlocks = new HashMap<String, Map<Integer, MetricsLongValue>>();
+    for (Codec codec : Codec.getCodecs()) {
+      Map<Integer, MetricsLongValue> m = new HashMap<Integer, MetricsLongValue>();
+      for (int i = 0; i < MAX_MONITORED_MISPLACED_BLOCKS; ++i) {
+        m.put(i, new MetricsLongValue(misplacedMetricHeader +
+                                   "_" + codec.id + "_" + i, registry));
+      }
+      codecToMisplacedBlocks.put(codec.id, m);
     }
   }
 
@@ -182,37 +181,37 @@ public class RaidNodeMetrics implements Updater {
     sourceBlocks = createSourceMap();
     sourceBytes = createSourceMap();
     sourceLogical = createSourceMap();
-    for (ErasureCodeType code : ErasureCodeType.values()) {
+    for (Codec codec : Codec.getCodecs()) {
       for (RaidState state : RaidState.values()) {
-        String head = (code + "_" + state + "_").toLowerCase();
-        createSourceMetrics(sourceFiles, code, state, head + "files");
-        createSourceMetrics(sourceBlocks, code, state, head + "blocks");
-        createSourceMetrics(sourceBytes, code, state, head + "bytes");
-        createSourceMetrics(sourceLogical, code, state, head + "logical");
+        String head = (codec.id + "_" + state + "_").toLowerCase();
+        createSourceMetrics(sourceFiles, codec.id, state, head + "files");
+        createSourceMetrics(sourceBlocks, codec.id, state, head + "blocks");
+        createSourceMetrics(sourceBytes, codec.id, state, head + "bytes");
+        createSourceMetrics(sourceLogical, codec.id, state, head + "logical");
       }
     }
   }
 
   private void createSourceMetrics(
-      Map<ErasureCodeType, Map<RaidState, MetricsLongValue>> m,
-      ErasureCodeType code, RaidState state, String name) {
+      Map<String, Map<RaidState, MetricsLongValue>> m,
+      String code, RaidState state, String name) {
     Map<RaidState, MetricsLongValue> innerMap = m.get(code);
     innerMap.put(state, new MetricsLongValue(name, registry));
   }
 
-  private Map<ErasureCodeType, Map<RaidState, MetricsLongValue>> createSourceMap() {
-    Map<ErasureCodeType, Map<RaidState, MetricsLongValue>> result =
-        new HashMap<ErasureCodeType, Map<RaidState, MetricsLongValue>>();
-    for (ErasureCodeType code : ErasureCodeType.values()) {
+  private Map<String, Map<RaidState, MetricsLongValue>> createSourceMap() {
+    Map<String, Map<RaidState, MetricsLongValue>> result =
+        new HashMap<String, Map<RaidState, MetricsLongValue>>();
+    for (Codec codec : Codec.getCodecs()) {
       Map<RaidState, MetricsLongValue> m =
           new HashMap<RaidState, MetricsLongValue>();
       for (RaidState state : RaidState.values()) {
         m.put(state, null);
       }
       m = new EnumMap<RaidState, MetricsLongValue>(m);
-      result.put(code, m);
+      result.put(codec.id, m);
     }
-    return new EnumMap<ErasureCodeType, Map<RaidState, MetricsLongValue>>(result);
+    return result;
   }
 
   private void initParityMetrics() {
@@ -220,7 +219,8 @@ public class RaidNodeMetrics implements Updater {
     parityBlocks = createParityMap();
     parityBytes = createParityMap();
     parityLogical = createParityMap();
-    for (ErasureCodeType code : ErasureCodeType.values()) {
+    for (Codec codec : Codec.getCodecs()) {
+      String code = codec.id;
       String head = (code + "_parity_").toLowerCase();
       createParityMetrics(parityFiles, code, head + "files");
       createParityMetrics(parityBlocks, code, head + "blocks");
@@ -232,18 +232,18 @@ public class RaidNodeMetrics implements Updater {
   }
 
   private void createParityMetrics(
-      Map<ErasureCodeType, MetricsLongValue> m,
-      ErasureCodeType code, String name) {
+      Map<String, MetricsLongValue> m,
+      String code, String name) {
     m.put(code, new MetricsLongValue(name, registry));
   }
 
-  private Map<ErasureCodeType, MetricsLongValue> createParityMap() {
-    Map<ErasureCodeType, MetricsLongValue> m =
-        new HashMap<ErasureCodeType, MetricsLongValue>();
-    for (ErasureCodeType code : ErasureCodeType.values()) {
-      m.put(code, null);
+  private Map<String, MetricsLongValue> createParityMap() {
+    Map<String, MetricsLongValue> m =
+        new HashMap<String, MetricsLongValue>();
+    for (Codec codec : Codec.getCodecs()) {
+      m.put(codec.id, null);
     }
-    return new EnumMap<ErasureCodeType, MetricsLongValue>(m);
+    return m;
   }
 
   @Override

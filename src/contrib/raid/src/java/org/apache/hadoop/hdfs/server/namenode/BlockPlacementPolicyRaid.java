@@ -41,6 +41,7 @@ import org.apache.hadoop.net.DNSToSwitchMapping;
 import org.apache.hadoop.net.NetworkTopology;
 import org.apache.hadoop.net.Node;
 import org.apache.hadoop.raid.RaidNode;
+import org.apache.hadoop.raid.Codec;
 import org.apache.hadoop.util.HostsFileReader;
 import org.apache.hadoop.util.StringUtils;
 
@@ -64,15 +65,6 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
   public static final Log LOG =
     LogFactory.getLog(BlockPlacementPolicyRaid.class);
   Configuration conf;
-  private int stripeLength;
-  private int xorParityLength;
-  private int rsParityLength;
-  private String xorPrefix = null;
-  private String rsPrefix = null;
-  private String raidTempPrefix = null;
-  private String raidrsTempPrefix = null;
-  private String raidHarTempPrefix = null;
-  private String raidrsHarTempPrefix = null;
   private FSNamesystem namesystem = null;
 
   private CachedLocatedBlocks cachedLocatedBlocks;
@@ -87,26 +79,8 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
                      hostsReader, dnsToSwitchMapping, namesystem);
     this.conf = conf;
     this.namesystem = namesystem;
-    this.stripeLength = RaidNode.getStripeLength(conf);
-    this.rsParityLength = RaidNode.rsParityLength(conf);
-    this.xorParityLength = 1;
     this.cachedLocatedBlocks = new CachedLocatedBlocks(conf, namesystem);
     this.cachedFullPathNames = new CachedFullPathNames(conf, namesystem);
-    try {
-      this.xorPrefix = RaidNode.xorDestinationPath(conf).toUri().getPath();
-      this.rsPrefix = RaidNode.rsDestinationPath(conf).toUri().getPath();
-    } catch (IOException e) {
-    }
-    if (this.xorPrefix == null) {
-      this.xorPrefix = RaidNode.DEFAULT_RAID_LOCATION;
-    }
-    if (this.rsPrefix == null) {
-      this.rsPrefix = RaidNode.DEFAULT_RAIDRS_LOCATION;
-    }
-    this.raidTempPrefix = RaidNode.xorTempPrefix(conf);
-    this.raidrsTempPrefix = RaidNode.rsTempPrefix(conf);
-    this.raidHarTempPrefix = RaidNode.xorHarTempPrefix(conf);
-    this.raidrsHarTempPrefix = RaidNode.rsHarTempPrefix(conf);
   }
 
   @Override
@@ -114,8 +88,8 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
       DatanodeDescriptor writer, List<DatanodeDescriptor> chosenNodes,
       long blocksize) {
     try {
-      FileType type = getFileType(srcPath);
-      if (type == FileType.NOT_RAID) {
+      FileInfo info = getFileInfo(srcPath);
+      if (info.type == FileType.NOT_RAID) {
         return super.chooseTarget(
             srcPath, numOfReplicas, writer, chosenNodes, blocksize);
       }
@@ -146,13 +120,13 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
     DatanodeDescriptor chosenNode = null;
     try {
       String path = cachedFullPathNames.get(inode);
-      FileType type = getFileType(path);
-      if (type == FileType.NOT_RAID) {
+      FileInfo info = getFileInfo(path);
+      if (info.type == FileType.NOT_RAID) {
         return super.chooseReplicaToDelete(
             inode, block, replicationFactor, first, second);
       }
       List<LocatedBlock> companionBlocks =
-          getCompanionBlocks(path, type, block);
+          getCompanionBlocks(path, info, block);
       if (companionBlocks == null || companionBlocks.size() == 0) {
         // Use the default method if it is not a valid raided or parity file
         return super.chooseReplicaToDelete(
@@ -174,22 +148,6 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
       return super.chooseReplicaToDelete(
           inode, block, replicationFactor, first, second);
     }
-  }
-
-  /**
-   * Obtain the excluded nodes for the current block that is being written
-   */
-  List<Node> getExcludedNodes(String file, FileType type) throws IOException {
-    Set<Node> excluded = new HashSet<Node>();
-    Collection<LocatedBlock> blocks = getCompanionBlocks(file, type, null);
-    if (blocks != null) {
-      for (LocatedBlock b : blocks) {
-        for (Node n : b.getLocations()) {
-          excluded.add(n);
-        }
-      }
-    }
-    return new ArrayList<Node>(excluded);
   }
 
   private DatanodeDescriptor chooseReplicaToDelete(
@@ -284,40 +242,33 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
    * Companion blocks are defined as the blocks that can help recover each
    * others by using raid decoder.
    * @param path The path of the file contains the block
-   * @param type The type of this file
+   * @param info The info of this file
    * @param block The given block
    *              null if it is the block which is currently being written to
    * @return the block locations of companion blocks
    */
-  List<LocatedBlock> getCompanionBlocks(String path, FileType type, Block block)
+  List<LocatedBlock> getCompanionBlocks(String path, FileInfo info, Block block)
       throws IOException {
-    switch (type) {
+    Codec codec = info.codec;
+    switch (info.type) {
       case NOT_RAID:
         return Collections.emptyList();
-      case XOR_HAR_TEMP_PARITY:
+      case HAR_TEMP_PARITY:
         return getCompanionBlocksForHarParityBlock(
-            path, xorParityLength, block);
-      case RS_HAR_TEMP_PARITY:
-        return getCompanionBlocksForHarParityBlock(
-            path, rsParityLength, block);
-      case XOR_TEMP_PARITY:
+            path, codec.parityLength, block);
+      case TEMP_PARITY:
         return getCompanionBlocksForParityBlock(
-            getSourceFile(path, raidTempPrefix), path, xorParityLength, block);
-      case RS_TEMP_PARITY:
+            getSourceFile(path, codec.tmpParityDirectory),
+            path, codec.parityLength, codec.stripeLength, block);
+      case PARITY:
         return getCompanionBlocksForParityBlock(
-            getSourceFile(path, raidrsTempPrefix), path, rsParityLength, block);
-      case XOR_PARITY:
-        return getCompanionBlocksForParityBlock(getSourceFile(path, xorPrefix),
-            path, xorParityLength, block);
-      case RS_PARITY:
-        return getCompanionBlocksForParityBlock(getSourceFile(path, rsPrefix),
-            path, rsParityLength, block);
-      case XOR_SOURCE:
+            getSourceFile(path, codec.parityDirectory),
+            path, codec.parityLength, codec.stripeLength, block);
+      case SOURCE:
         return getCompanionBlocksForSourceBlock(
-            path, getParityFile(path), xorParityLength, block);
-      case RS_SOURCE:
-        return getCompanionBlocksForSourceBlock(
-            path, getParityFile(path), xorParityLength, block);
+            path,
+            getParityFile(codec.parityDirectory, path),
+            codec.parityLength, codec.stripeLength, block);
     }
     return Collections.emptyList();
   }
@@ -339,7 +290,7 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
   }
 
   private List<LocatedBlock> getCompanionBlocksForParityBlock(
-      String src, String parity, int parityLength, Block block)
+      String src, String parity, int parityLength, int stripeLength, Block block)
       throws IOException {
     int blockIndex = getBlockIndex(parity, block);
     List<LocatedBlock> result = new ArrayList<LocatedBlock>();
@@ -371,7 +322,7 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
   }
 
   private List<LocatedBlock> getCompanionBlocksForSourceBlock(
-      String src, String parity, int parityLength, Block block)
+      String src, String parity, int parityLength, int stripeLength, Block block)
       throws IOException {
     int blockIndex = getBlockIndex(src, block);
     List<LocatedBlock> result = new ArrayList<LocatedBlock>();
@@ -555,24 +506,6 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
   }
 
   /**
-   * Get path for the corresponding parity file for a source file.
-   * Returns null if it does not exists
-   * @param src the toUri path of the source file
-   * @return the toUri path of the parity file
-   */
-  String getParityFile(String src) throws IOException {
-    String xorParity = getParityFile(xorPrefix, src);
-    if (xorParity != null) {
-      return xorParity;
-    }
-    String rsParity = getParityFile(rsPrefix, src);
-    if (rsParity != null) {
-      return rsParity;
-    }
-    return null;
-  }
-
-  /**
    * Get path for the parity file. Returns null if it does not exists
    * @param parityPrefix usuall "/raid/" or "/raidrs/"
    * @return the toUri path of the parity file
@@ -590,47 +523,39 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
     return path.lastIndexOf(RaidNode.HAR_SUFFIX) != -1;
   }
 
-  enum FileType {
-    NOT_RAID,
-    XOR_HAR_TEMP_PARITY,
-    XOR_TEMP_PARITY,
-    XOR_PARITY,
-    XOR_SOURCE,
-    RS_HAR_TEMP_PARITY,
-    RS_TEMP_PARITY,
-    RS_PARITY,
-    RS_SOURCE,
+  class FileInfo {
+    FileInfo(FileType type, Codec codec) {
+      this.type = type;
+      this.codec = codec;
+    }
+    final FileType type;
+    final Codec codec;
   }
 
-  FileType getFileType(String path) throws IOException {
-    if (path.startsWith(raidHarTempPrefix + Path.SEPARATOR)) {
-      return FileType.XOR_HAR_TEMP_PARITY;
+  enum FileType {
+    NOT_RAID,
+    HAR_TEMP_PARITY,
+    TEMP_PARITY,
+    PARITY,
+    SOURCE,
+  }
+
+  FileInfo getFileInfo(String path) throws IOException {
+    for (Codec c : Codec.getCodecs()) {
+      if (path.startsWith(c.tmpHarDirectory + Path.SEPARATOR)) {
+        return new FileInfo(FileType.HAR_TEMP_PARITY, c);
+      }
+      if (path.startsWith(c.tmpParityDirectory + Path.SEPARATOR)) {
+        return new FileInfo(FileType.TEMP_PARITY, c);
+      }
+      if (path.startsWith(c.parityDirectory + Path.SEPARATOR)) {
+        return new FileInfo(FileType.PARITY, c);
+      }
+      String parity = getParityFile(c.parityDirectory, path);
+      if (parity != null) {
+        return new FileInfo(FileType.SOURCE, c);
+      }
     }
-    if (path.startsWith(raidrsHarTempPrefix + Path.SEPARATOR)) {
-      return FileType.RS_HAR_TEMP_PARITY;
-    }
-    if (path.startsWith(raidTempPrefix + Path.SEPARATOR)) {
-      return FileType.XOR_TEMP_PARITY;
-    }
-    if (path.startsWith(raidrsTempPrefix + Path.SEPARATOR)) {
-      return FileType.RS_TEMP_PARITY;
-    }
-    if (path.startsWith(xorPrefix + Path.SEPARATOR)) {
-      return FileType.XOR_PARITY;
-    }
-    if (path.startsWith(rsPrefix + Path.SEPARATOR)) {
-      return FileType.RS_PARITY;
-    }
-    String parity = getParityFile(path);
-    if (parity == null) {
-      return FileType.NOT_RAID;
-    }
-    if (parity.startsWith(xorPrefix + Path.SEPARATOR)) {
-      return FileType.XOR_SOURCE;
-    }
-    if (parity.startsWith(rsPrefix + Path.SEPARATOR)) {
-      return FileType.RS_SOURCE;
-    }
-    return FileType.NOT_RAID;
+    return new FileInfo(FileType.NOT_RAID, null);
   }
 }

@@ -55,6 +55,10 @@ public abstract class Decoder {
   protected byte[][] readBufs;
   protected byte[][] writeBufs;
 
+  Decoder(Configuration conf, Codec codec) {
+    // TODO: implement this
+  }
+
   Decoder(Configuration conf, int stripeSize, int paritySize) {
     this.conf = conf;
     this.parallelism = conf.getInt("raid.encoder.parallelism",

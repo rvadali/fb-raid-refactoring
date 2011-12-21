@@ -16,8 +16,6 @@
   RaidNode raidNode = (RaidNode) application.getAttribute("raidnode");
   StatisticsCollector stats = (StatisticsCollector) raidNode
       .getStatsCollector();
-  Statistics xorSt = stats.getRaidStatistics(ErasureCodeType.XOR);
-  Statistics rsSt = stats.getRaidStatistics(ErasureCodeType.RS);
   PurgeMonitor purge = raidNode.getPurgeMonitor();
   PlacementMonitor place = raidNode.getPlacementMonitor();
   DiskStatus ds = new DFSClient(raidNode.getConf()).getDiskStatus();
@@ -84,18 +82,20 @@
   }
   out.print(table(tableStr));
 %>
-<hr>
-<h2>XOR</h2>
-<%
+
+<% for (Codec c : Codec.getCodecs()) {
+  out.print("<hr>");
+  out.print("<h2>" + c.id.toUpperCase() + "</h2>");
   String paritySize, estParitySize;
-  if (xorSt != null) {
-    out.print(xorSt.htmlTable());
-    saving = StringUtils.byteDesc(xorSt.getSaving());
-    doneSaving = StringUtils.byteDesc(xorSt.getDoneSaving());
-    repl = StringUtils.limitDecimalTo2(xorSt.getEffectiveReplication());
-    paritySize = StringUtils.byteDesc(xorSt.getParityCounters()
+  Statistics st = stats.getRaidStatistics(c.id);
+  if (st != null) {
+    out.print(st.htmlTable());
+    saving = StringUtils.byteDesc(st.getSaving());
+    doneSaving = StringUtils.byteDesc(st.getDoneSaving());
+    repl = StringUtils.limitDecimalTo2(st.getEffectiveReplication());
+    paritySize = StringUtils.byteDesc(st.getParityCounters()
         .getNumBytes());
-    estParitySize = StringUtils.byteDesc(xorSt.getEstimatedParitySize());
+    estParitySize = StringUtils.byteDesc(st.getEstimatedParitySize());
     tableStr = "";
     tableStr += tr(td("Effective Replication") + td(":") + td(repl));
     tableStr += tr(td("Saving") + td(":") + td(saving));
@@ -106,34 +106,9 @@
   } else {
     out.print("Wait for collecting");
   }
-%>
-<hr>
-<h2>RS</h2>
-<%
-  if (rsSt != null) {
-    out.print(rsSt.htmlTable());
-    saving = StringUtils.byteDesc(rsSt.getSaving());
-    doneSaving = StringUtils.byteDesc(rsSt.getDoneSaving());
-    repl = StringUtils.limitDecimalTo2(rsSt.getEffectiveReplication());
-    paritySize = StringUtils.byteDesc(rsSt.getParityCounters()
-        .getNumBytes());
-    estParitySize = StringUtils.byteDesc(rsSt.getEstimatedParitySize());
-    tableStr = "";
-    tableStr += tr(td("Effective Replication") + td(":") + td(repl));
-    tableStr += tr(td("Saving") + td(":") + td(saving));
-    tableStr += tr(td("Done Saving") + td(":") + td(doneSaving));
-    tableStr += tr(td("Parity / Expected") + td(":")
-        + td(paritySize + " / " + estParitySize));
-    out.print(table(tableStr));
-  } else {
-    out.print("Wait for collecting");
   }
 %>
-<hr>
-<h2>Purge Progress</h2>
-<%
-  out.print(purge.htmlTable());
-%>
+
 <hr>
 <h2>Block Placement</h2>
 <%

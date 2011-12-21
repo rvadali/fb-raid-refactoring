@@ -38,10 +38,11 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hdfs.protocol.Block;
 import org.apache.hadoop.hdfs.protocol.LocatedBlocks;
-import org.apache.hadoop.raid.ErasureCodeType;
+import org.apache.hadoop.raid.Codec;
 import org.apache.hadoop.raid.ParityFilePair;
 import org.apache.hadoop.raid.RaidNode;
 import org.apache.hadoop.raid.RaidUtils;
+import org.apache.hadoop.raid.Utils;
 import org.apache.hadoop.util.StringUtils;
 
 public class TestRaidDfs extends TestCase {
@@ -60,7 +61,7 @@ public class TestRaidDfs extends TestCase {
   MiniDFSCluster dfs = null;
   FileSystem fileSys = null;
   String jobTrackerName = null;
-  ErasureCodeType code;
+  Codec codec;
   int stripeLength;
 
   private void mySetup(
@@ -71,7 +72,12 @@ public class TestRaidDfs extends TestCase {
 
     conf.setInt("raid.encoder.bufsize", 128);
     conf.setInt("raid.decoder.bufsize", 128);
-    conf.setInt(RaidNode.RS_PARITY_LENGTH_KEY, rsParityLength);
+
+    if ("xor".equals(erasureCode)) {
+      Utils.loadTestCodecs(stripeLength, 1, rsParityLength, "/destraid", "");
+    } else {
+      Utils.loadTestCodecs(stripeLength, 1, rsParityLength, "", "/destraid");
+    }
 
     // scan all policies once every 5 second
     conf.setLong("raid.policy.rescan.interval", 5000);
@@ -84,9 +90,6 @@ public class TestRaidDfs extends TestCase {
     conf.set("raid.classname", "org.apache.hadoop.raid.LocalRaidNode");
 
     conf.set("raid.server.address", "localhost:0");
-    conf.setInt("hdfs.raid.stripeLength", stripeLength);
-    conf.set("xor".equals(erasureCode) ? RaidNode.RAID_LOCATION_KEY :
-             RaidNode.RAIDRS_LOCATION_KEY, "/destraid");
 
     dfs = new MiniDFSCluster(conf, NUM_DATANODES, true, null);
     dfs.waitActive();
@@ -178,8 +181,8 @@ public class TestRaidDfs extends TestCase {
     long length = fileSys.getFileStatus(srcFile).getLen();
 
     RaidNode.doRaid(conf, fileSys.getFileStatus(srcFile),
-      destPath, code, new RaidNode.Statistics(), RaidUtils.NULL_PROGRESSABLE,
-      false, repl, repl, stripeLength);
+      destPath, codec, new RaidNode.Statistics(), RaidUtils.NULL_PROGRESSABLE,
+      false, repl, repl);
 
     // Delete first block of file
     for (int blockNumToCorrupt : listBlockNumToCorrupt) {
@@ -201,7 +204,7 @@ public class TestRaidDfs extends TestCase {
   public void testRaidDfsRs() throws Exception {
     LOG.info("Test testRaidDfs started.");
 
-    code = ErasureCodeType.RS;
+    codec = Codec.getCodec("rs");
     long blockSize = 8192L;
     int numBlocks = 8;
     stripeLength = 3;
@@ -230,7 +233,7 @@ public class TestRaidDfs extends TestCase {
    * Test DistributedRaidFileSystem.readFully()
    */
   public void testReadFully() throws Exception {
-    code = ErasureCodeType.XOR;
+    codec = Codec.getCodec("xor");
     stripeLength = 3;
     mySetup("xor", 1);
 
@@ -250,9 +253,9 @@ public class TestRaidDfs extends TestCase {
 
       // Generate parity.
       RaidNode.doRaid(conf, fileSys.getFileStatus(file),
-        new Path("/destraid"), code, new RaidNode.Statistics(),
+        new Path("/destraid"), codec, new RaidNode.Statistics(),
         RaidUtils.NULL_PROGRESSABLE,
-        false, 1, 1, stripeLength);
+        false, 1, 1);
       int[] corrupt = {0, 4, 7}; // first, last and middle block
       for (int blockIdx : corrupt) {
         LOG.info("Corrupt block " + blockIdx + " of file " + file);
@@ -270,7 +273,7 @@ public class TestRaidDfs extends TestCase {
   }
 
   public void testSeek() throws Exception {
-    code = ErasureCodeType.XOR;
+    codec = Codec.getCodec("xor");
     stripeLength = 3;
     mySetup("xor", 1);
 
@@ -324,7 +327,7 @@ public class TestRaidDfs extends TestCase {
   public void testRaidDfsXor() throws Exception {
     LOG.info("Test testRaidDfs started.");
 
-    code = ErasureCodeType.XOR;
+    codec = Codec.getCodec("xor");
     long blockSize = 8192L;
     int numBlocks = 8;
     stripeLength = 3;
@@ -393,7 +396,7 @@ public class TestRaidDfs extends TestCase {
   }
 
   public void testTooManyErrorsDecodeXOR() throws Exception {
-    code = ErasureCodeType.XOR;
+    codec = Codec.getCodec("xor");
     long blockSize = 8192L;
     int numBlocks = 8;
     stripeLength = 3;
@@ -418,7 +421,7 @@ public class TestRaidDfs extends TestCase {
   }
 
   public void testTooManyErrorsDecodeRS() throws Exception {
-    code = ErasureCodeType.RS;
+    codec = Codec.getCodec("rs");
     long blockSize = 8192L;
     int numBlocks = 8;
     stripeLength = 3;
@@ -442,7 +445,7 @@ public class TestRaidDfs extends TestCase {
   }
 
   public void testTooManyErrorsEncode() throws Exception {
-    code = ErasureCodeType.XOR;
+    codec = Codec.getCodec("xor");
     long blockSize = 8192L;
     int numBlocks = 8;
     stripeLength = 3;
@@ -463,8 +466,8 @@ public class TestRaidDfs extends TestCase {
       boolean expectedExceptionThrown = false;
       try {
         RaidNode.doRaid(conf, fileSys.getFileStatus(file),
-          destPath, code, new RaidNode.Statistics(), RaidUtils.NULL_PROGRESSABLE,
-          false, repl, repl, stripeLength);
+          destPath, codec, new RaidNode.Statistics(), RaidUtils.NULL_PROGRESSABLE,
+          false, repl, repl);
       } catch (IOException e) {
         LOG.info("Expected exception caught" + e);
         expectedExceptionThrown = true;
@@ -476,7 +479,7 @@ public class TestRaidDfs extends TestCase {
   }
 
   public void testTooManyErrorsEncodeRS() throws Exception {
-    code = ErasureCodeType.RS;
+    codec = Codec.getCodec("rs");
     long blockSize = 8192L;
     int numBlocks = 8;
     stripeLength = 3;
@@ -497,8 +500,8 @@ public class TestRaidDfs extends TestCase {
       boolean expectedExceptionThrown = false;
       try {
         RaidNode.doRaid(conf, fileSys.getFileStatus(file),
-          destPath, code, new RaidNode.Statistics(), RaidUtils.NULL_PROGRESSABLE,
-          false, repl, repl, stripeLength);
+          destPath, codec, new RaidNode.Statistics(), RaidUtils.NULL_PROGRESSABLE,
+          false, repl, repl);
       } catch (IOException e) {
         expectedExceptionThrown = true;
         LOG.info("Expected exception caught" + e);

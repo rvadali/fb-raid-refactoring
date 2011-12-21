@@ -29,15 +29,15 @@ import org.apache.hadoop.raid.protocol.PolicyInfo;
 class ExpandedPolicy {
   final String srcPrefix;
   final long modTimePeriod;
-  final ErasureCodeType code;
+  final Codec codec;
   final int targetReplication;
   final PolicyInfo parentPolicy;
 
   ExpandedPolicy(String srcPrefix, long modTimePeriod,
-      ErasureCodeType code, int targetReplication, PolicyInfo parentPolicy) {
+      Codec codec, int targetReplication, PolicyInfo parentPolicy) {
     this.srcPrefix = srcPrefix;
     this.modTimePeriod = modTimePeriod;
-    this.code = code;
+    this.codec = codec;
     this.targetReplication = targetReplication;
     this.parentPolicy = parentPolicy;
   }
@@ -58,9 +58,9 @@ class ExpandedPolicy {
       long modTimePeriod = Long.parseLong(info.getProperty("modTimePeriod"));
       int targetReplication =
         Integer.parseInt(info.getProperty("targetReplication"));
-      ErasureCodeType code = info.getErasureCode();
+      Codec codec = Codec.getCodec(info.getCodecId());
       ExpandedPolicy ePolicy = new ExpandedPolicy(
-          srcPrefix, modTimePeriod, code, targetReplication, info);
+          srcPrefix, modTimePeriod, codec, targetReplication, info);
       result.add(ePolicy);
     }
     return result;
@@ -76,13 +76,11 @@ class ExpandedPolicy {
       if (p1.srcPrefix.length() < p2.srcPrefix.length()) {
         return 1;
       }
-      if (p1.code == ErasureCodeType.RS &&
-          p2.code == ErasureCodeType.XOR) {
-        // Prefers RS code
+      if (p1.codec.priority > p2.codec.priority) {
+        // Prefers higher priority
         return -1;
       }
-      if (p1.code == ErasureCodeType.XOR &&
-          p2.code == ErasureCodeType.RS) {
+      if (p1.codec.priority < p2.codec.priority) {
         return 1;
       }
       // Prefers lower target replication factor

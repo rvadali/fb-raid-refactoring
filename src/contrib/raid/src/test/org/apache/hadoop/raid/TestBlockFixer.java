@@ -148,38 +148,6 @@ public class TestBlockFixer extends TestCase {
   }
 
   /**
-   * Tests isXorParityFile and isRsParityFile
-   */
-  @Test
-  public void testIsParityFile() throws IOException {
-    conf = new Configuration();
-    dfsCluster = new MiniDFSCluster(conf, NUM_DATANODES, true, null);
-    dfsCluster.waitActive();
-    FileSystem fs = dfsCluster.getFileSystem();
-
-    try {
-      Configuration testConf = fs.getConf();
-      testConf.set("hdfs.raid.locations", "/raid");
-      testConf.set("hdfs.raidrs.locations", "/raidrs");
-
-      BlockReconstructor.CorruptBlockReconstructor helper =
-        new BlockReconstructor.CorruptBlockReconstructor(testConf);
-
-      assertFalse("incorrectly identified rs parity file as xor parity file",
-          helper.isXorParityFile(new Path("/raidrs/test/test")));
-      assertTrue("could not identify rs parity file",
-          helper.isRsParityFile(new Path("/raidrs/test/test")));
-      assertTrue("could not identify xor parity file",
-          helper.isXorParityFile(new Path("/raid/test/test")));
-      assertFalse("incorrectly identified xor parity file as rs parity file",
-          helper.isRsParityFile(new Path("/raid/test/test")));
-    } finally {
-      dfsCluster.shutdown();
-    }
-  }
-
-
-  /**
    * Test the filtering of trash files from the list of corrupt files.
    */
   @Test
@@ -237,7 +205,6 @@ public class TestBlockFixer extends TestCase {
 
     // create an instance of the RaidNode
     Configuration localConf = new Configuration(conf);
-    localConf.set(RaidNode.RAID_LOCATION_KEY, "/destraid");
     localConf.setInt("raid.blockfix.interval", 1000);
     if (local) {
       localConf.set("raid.blockfix.classname",
@@ -320,7 +287,6 @@ public class TestBlockFixer extends TestCase {
 
     // create an instance of the RaidNode
     Configuration localConf = new Configuration(conf);
-    localConf.set(RaidNode.RAID_LOCATION_KEY, "/destraid");
     localConf.setInt("raid.blockfix.interval", 1000);
     if (local) {
       localConf.set("raid.blockfix.classname",
@@ -471,7 +437,6 @@ public class TestBlockFixer extends TestCase {
 
     // create an instance of the RaidNode
     Configuration localConf = new Configuration(conf);
-    localConf.set(RaidNode.RAID_LOCATION_KEY, "/destraid");
     localConf.setInt("raid.blockfix.interval", 1000);
     if (local) {
       localConf.set("raid.blockfix.classname",
@@ -562,7 +527,6 @@ public class TestBlockFixer extends TestCase {
 
     // create an instance of the RaidNode
     Configuration localConf = new Configuration(conf);
-    localConf.set(RaidNode.RAID_LOCATION_KEY, "/destraid");
     localConf.setInt("raid.blockfix.interval", 1000);
     localConf.setInt(RaidNode.RAID_PARITY_HAR_THRESHOLD_DAYS_KEY, 0);
     if (local) {
@@ -664,7 +628,6 @@ public class TestBlockFixer extends TestCase {
 
     // create an instance of the RaidNode
     Configuration localConf = new Configuration(conf);
-    localConf.set(RaidNode.RAID_LOCATION_KEY, "/destraid");
     localConf.setInt("raid.blockfix.interval", 1000);
     localConf.set("raid.blockfix.classname", 
                   "org.apache.hadoop.raid.DistBlockIntegrityMonitor");
@@ -770,7 +733,6 @@ public class TestBlockFixer extends TestCase {
 
     // create an instance of the RaidNode
     Configuration localConf = new Configuration(conf);
-    localConf.set(RaidNode.RAID_LOCATION_KEY, "/destraid");
     localConf.setInt("raid.blockfix.interval", 1000);
     localConf.set("raid.blockfix.classname", 
                   "org.apache.hadoop.raid.DistBlockIntegrityMonitor");
@@ -877,7 +839,7 @@ public class TestBlockFixer extends TestCase {
     long blockSize = 16384;
     int stripeLength = 3;
     Path destPath = new Path("/raidrs");
-    ErasureCodeType code = ErasureCodeType.RS;
+    Codec codec = Codec.getCodec("rs");
     mySetup(stripeLength, -1); // never har
     try {
       // Create test file and raid it.
@@ -885,8 +847,8 @@ public class TestBlockFixer extends TestCase {
         fileSys, srcFile, repl, numBlocks, blockSize);
       FileStatus stat = fileSys.getFileStatus(srcFile);
       RaidNode.doRaid(conf, stat,
-        destPath, code, new RaidNode.Statistics(), RaidUtils.NULL_PROGRESSABLE,
-        false, repl, repl, stripeLength);
+        destPath, codec, new RaidNode.Statistics(), RaidUtils.NULL_PROGRESSABLE,
+        false, repl, repl);
 
       // Corrupt first block of file.
       int blockIdxToCorrupt = 1;
@@ -950,8 +912,8 @@ public class TestBlockFixer extends TestCase {
     // do not use map-reduce cluster for Raiding
     conf.set("raid.classname", "org.apache.hadoop.raid.LocalRaidNode");
     conf.set("raid.server.address", "localhost:0");
-    conf.setInt("hdfs.raid.stripeLength", stripeLength);
-    conf.set("hdfs.raid.locations", "/destraid");
+
+    Utils.loadTestCodecs(stripeLength, 1, 3, "/destraid", "/destraidrs");
 
     conf.setBoolean("dfs.permissions", false);
 
@@ -973,7 +935,7 @@ public class TestBlockFixer extends TestCase {
     String str = "<configuration> " +
                      "<policy name = \"RaidTest1\"> " +
                         "<srcPath prefix=\"/user/dhruba/raidtest\"/> " +
-                        "<erasureCode>xor</erasureCode> " +
+                        "<codecId>xor</codecId> " +
                         "<destPath> /destraid</destPath> " +
                         "<property> " +
                           "<name>targetReplication</name> " +

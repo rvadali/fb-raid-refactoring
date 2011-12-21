@@ -19,15 +19,18 @@
 package org.apache.hadoop.raid;
 
 import java.io.IOException;
+import java.lang.IllegalArgumentException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.HashMap;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.util.ReflectionUtils;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -125,7 +128,7 @@ public class Codec {
       Configuration.addDefaultResource("hdfs-default.xml");
       Configuration.addDefaultResource("hdfs-site.xml");
       initializeCodecs(new Configuration());
-    } catch (JSONException e) {
+    } catch (Exception e) {
       LOG.fatal("Fail initialize Raid codecs", e);
       System.exit(-1);
     }
@@ -157,7 +160,7 @@ public class Codec {
     idToCodec = Collections.unmodifiableMap(idToCodec);
   }
 
-  public Codec(JSONObject json) throws JSONException {
+  private Codec(JSONObject json) throws JSONException {
     this.json = json;
     this.id = json.getString("id");
     this.parityLength = json.getInt("parity_length");
@@ -172,6 +175,22 @@ public class Codec {
 
     this.tmpHarDirectory = getJSONString(
         json, "tmp_har_dir", "/tmp" + this.parityDirectory + "_har");
+
+    checkDirectory(parityDirectory);
+    checkDirectory(tmpParityDirectory);
+    checkDirectory(tmpHarDirectory);
+  }
+
+  /**
+   * Make sure the direcotry string has the format "/a/b/c"
+   */
+  private void checkDirectory(String d) {
+    if (!d.startsWith(Path.SEPARATOR)) {
+      throw new IllegalArgumentException("Bad directory:" + d);
+    }
+    if (d.endsWith(Path.SEPARATOR)) {
+      throw new IllegalArgumentException("Bad directory:" + d);
+    }
   }
 
   static private String getJSONString(
@@ -191,6 +210,58 @@ public class Codec {
     ErasureCode code = (ErasureCode) ReflectionUtils.newInstance(erasureCode, conf);
     code.init(this);
     return code;
+  }
+
+  @Override
+  public String toString() {
+    return json.toString();
+  }
+
+  /**
+   * Used by unit test only
+   */
+  static void addCodec(Codec codec) {
+    List<Codec> newCodecs = new ArrayList<Codec>();
+    newCodecs.addAll(codecs);
+    newCodecs.add(codec);
+    codecs = Collections.unmodifiableList(newCodecs);
+
+    Map<String, Codec> newIdToCodec = new HashMap<String, Codec>();
+    newIdToCodec.putAll(idToCodec);
+    newIdToCodec.put(codec.id, codec);
+    idToCodec = Collections.unmodifiableMap(newIdToCodec);
+  }
+
+  /**
+   * Used by unit test only
+   */
+  static void clearCodecs() {
+    codecs = Collections.emptyList();
+    idToCodec = Collections.emptyMap();
+  }
+
+  /**
+   * Used by unit test only
+   */
+  Codec(String id,
+                int parityLength,
+                int stripeLength,
+                String erasureCodeClass,
+                String parityDirectory,
+                int priority,
+                String description,
+                String tmpParityDirectory,
+                String tmpHarDirectory) {
+    this.json = null;
+    this.id = id;
+    this.parityLength = parityLength;
+    this.stripeLength = stripeLength;
+    this.erasureCodeClass = erasureCodeClass;
+    this.parityDirectory = parityDirectory;
+    this.priority = priority;
+    this.description = description;
+    this.tmpParityDirectory = tmpParityDirectory;
+    this.tmpHarDirectory = tmpHarDirectory;
   }
 
 }

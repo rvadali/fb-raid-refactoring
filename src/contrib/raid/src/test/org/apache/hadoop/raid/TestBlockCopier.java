@@ -92,8 +92,6 @@ public class TestBlockCopier extends TestCase {
     ParityFilePair.disableCacheUsedInTestOnly();
   }
   
-  
-  
   // Setup -- manually run before each test
   public void setup(int numDataNodes, int timeBeforeHar) 
       throws IOException, ClassNotFoundException {
@@ -111,8 +109,8 @@ public class TestBlockCopier extends TestCase {
     // do not use map-reduce cluster for Raiding
     conf.set("raid.classname", "org.apache.hadoop.raid.LocalRaidNode");
     conf.set("raid.server.address", "localhost:0");
-    conf.setInt("hdfs.raid.stripeLength", STRIPE_LENGTH);
-    conf.set("hdfs.raid.locations", "/raid");
+
+    Utils.loadTestCodecs(STRIPE_LENGTH, 1, 3, "/raid", "/raidrs");
 
     conf.setBoolean("dfs.permissions", false);
     
@@ -144,7 +142,7 @@ public class TestBlockCopier extends TestCase {
     String str = "<configuration> " +
                    "<policy name = \"RaidTest1\"> " +
                       "<srcPath prefix=\"/user/hadoop/raidtest\"/> " +
-                      "<erasureCode>xor</erasureCode> " +
+                      "<codeId>xor</codeId> " +
                       "<destPath> /raidxor</destPath> " +
                       "<property> " +
                         "<name>targetReplication</name> " +
@@ -184,7 +182,6 @@ public class TestBlockCopier extends TestCase {
     // Set up raid node
     if (raidnode == null) {
       Configuration localConf = new Configuration(conf);
-      localConf.set(RaidNode.RAID_LOCATION_KEY, "/raid");
       localConf.setInt("raid.blockfix.interval", 1000);
       localConf.set("raid.blockfix.classname",
                     "org.apache.hadoop.raid.DistBlockIntegrityMonitor");
@@ -306,9 +303,9 @@ public class TestBlockCopier extends TestCase {
     // Raid the file; parity blocks go on nodes[0]
     BlockPlacementPolicyFakeData.lastInstance.overridingDatanode = nodes[0];
     
-    RaidNode.doRaid(conf, file, raidPath, ErasureCodeType.RS, 
+    RaidNode.doRaid(conf, file, raidPath, Codec.getCodec("rs"),
         new RaidNode.Statistics(), RaidUtils.NULL_PROGRESSABLE, 
-        false, repl, repl, STRIPE_LENGTH);
+        false, repl, repl);
     Thread.sleep(1000);
     printFileLocations(file);
     
@@ -508,9 +505,9 @@ public class TestBlockCopier extends TestCase {
     Path filePath = new Path("/user/hadoop/testReconstruction/file");
     long[] crcs = createRandomFile(filePath, repl, numBlocks);
     FileStatus file = fileSys.getFileStatus(filePath);
-    RaidNode.doRaid(conf, file, raidPath, ErasureCodeType.RS, 
+    RaidNode.doRaid(conf, file, raidPath, Codec.getCodec("rs"),
         new RaidNode.Statistics(), RaidUtils.NULL_PROGRESSABLE, 
-        false, repl, repl, STRIPE_LENGTH);
+        false, repl, repl);
     
     // Do some testing
     printFileLocations(file);

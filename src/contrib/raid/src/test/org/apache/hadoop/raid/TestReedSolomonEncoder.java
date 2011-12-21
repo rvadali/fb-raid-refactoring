@@ -91,6 +91,7 @@ public class TestReedSolomonEncoder extends TestCase {
     fileSys = dfs.getFileSystem();
     namenode = fileSys.getUri().toString();
 
+    Utils.loadTestCodecs();
     FileSystem.setDefaultUri(conf, namenode);
 
   }

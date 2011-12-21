@@ -86,7 +86,7 @@ public class TestRaidShell extends TestCase {
     int stripeLength = 3;
     mySetup(stripeLength, -1);
     Path file1 = new Path("/user/dhruba/raidtest/file1");
-    Path destPath = new Path("/destraid/user/dhruba/raidtest");
+    Path destPath = new Path("/raid/user/dhruba/raidtest");
     long crc1 = TestRaidDfs.createTestFilePartialLastBlock(fileSys, file1,
                                                           1, 7, blockSize);
     long file1Len = fileSys.getFileStatus(file1).getLen();
@@ -94,7 +94,6 @@ public class TestRaidShell extends TestCase {
 
     // create an instance of the RaidNode
     Configuration localConf = new Configuration(conf);
-    localConf.set(RaidNode.RAID_LOCATION_KEY, "/destraid");
     localConf.setInt("raid.blockfix.interval", 1000);
     localConf.set("raid.blockfix.classname",
                   "org.apache.hadoop.raid.LocalBlockIntegrityMonitor");
@@ -193,7 +192,7 @@ public class TestRaidShell extends TestCase {
     conf.set("raid.classname", "org.apache.hadoop.raid.LocalRaidNode");
     conf.set("raid.server.address", "localhost:0");
     conf.setInt("hdfs.raid.stripeLength", stripeLength);
-    conf.set("hdfs.raid.locations", "/destraid");
+    conf.set("hdfs.raid.locations", "/raid");
 
     conf.setBoolean("dfs.permissions", false);
 
@@ -212,8 +211,8 @@ public class TestRaidShell extends TestCase {
     String str = "<configuration> " +
                    "<policy name = \"RaidTest1\"> " +
                         "<srcPath prefix=\"/user/dhruba/raidtest\"/> " +
-                        "<erasureCode>xor</erasureCode> " +
-                        "<destPath> /destraid</destPath> " +
+                        "<codecId>xor</codecId> " +
+                        "<destPath> /raid</destPath> " +
                         "<property> " +
                           "<name>targetReplication</name> " +
                           "<value>1</value> " +
@@ -248,6 +247,8 @@ public class TestRaidShell extends TestCase {
                  "</configuration>";
     fileWriter.write(str);
     fileWriter.close();
+
+    Utils.loadTestCodecs();
   }
 
   private void myTearDown() throws Exception {

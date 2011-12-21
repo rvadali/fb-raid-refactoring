@@ -48,8 +48,6 @@ public class MissingParityFiles {
   private Configuration conf;
   private boolean directoryTraversalShuffle;
   private int directoryTraversalThreads;
-  private Path xorRaidRoot;
-  private Path rsRaidRoot;
   private FileSystem fs;
   private static final int REPLICATION_LIMIT = 3;
 
@@ -60,9 +58,7 @@ public class MissingParityFiles {
           conf.getBoolean(RaidNode.RAID_DIRECTORYTRAVERSAL_SHUFFLE, true);
       this.directoryTraversalThreads =
           conf.getInt(RaidNode.RAID_DIRECTORYTRAVERSAL_THREADS, 4);
-      this.xorRaidRoot = RaidNode.getDestinationPath(ErasureCodeType.XOR, conf);
-      this.rsRaidRoot = RaidNode.getDestinationPath(ErasureCodeType.RS, conf);
-      this.fs = xorRaidRoot.getFileSystem(conf);
+      this.fs = new Path(Path.SEPARATOR).getFileSystem(conf);
     } catch(IOException ex) {
       System.err.println("MissingParityFiles exception: " + ex);
     }
@@ -80,29 +76,33 @@ public class MissingParityFiles {
     FileStatus newFile;
     while ((newFile = traversal.next()) != DirectoryTraversal.FINISH_TOKEN) {
       Path filePath = newFile.getPath();
-      if(newFile.getReplication() < MissingParityFiles.REPLICATION_LIMIT) {
-        if(!isParityFile(root, filePath)) {
-          Path xorParityPath = new Path(xorRaidRoot, RaidNode.makeRelative(filePath));
-          Path rsParityPath = new Path(rsRaidRoot, RaidNode.makeRelative(filePath));
-          ParityFilePair xorParityFile =
-            ParityFilePair.getParityFile(ErasureCodeType.XOR, filePath, conf);
-          ParityFilePair rsParityFile =
-            ParityFilePair.getParityFile(ErasureCodeType.RS, filePath, conf);
-          if(xorParityFile == null && rsParityFile == null) {
-            System.out.println("File with replication < 3 and no parity file: " + filePath);
-            allMissingParityFiles.add(filePath);
+      if (newFile.getReplication() < MissingParityFiles.REPLICATION_LIMIT) {
+        boolean found = false;
+        if (isParityFile(filePath)) {
+          continue;
+        }
+        for (Codec c : Codec.getCodecs()) {
+          ParityFilePair parityPair =
+            ParityFilePair.getParityFile(c, filePath, conf);
+          if (parityPair != null) {
+            found = true;
           }
+        }
+        if (!found) {
+          System.out.println("File with replication < 3 and no parity file: " + filePath);
+          allMissingParityFiles.add(filePath);
         }
       }
     }
     return allMissingParityFiles;
   }
 
-  public boolean isParityFile(Path root, Path filePath) {
-    String pathStr = filePath.toString();
-    if(pathStr.startsWith(xorRaidRoot.toString()) || 
-        pathStr.startsWith(rsRaidRoot.toString())) {
-      return true;
+  public boolean isParityFile(Path filePath) {
+    String pathStr = filePath.toUri().getPath();
+    for (Codec c : Codec.getCodecs()) {
+      if (pathStr.startsWith(c.parityDirectory)) {
+        return true;
+      }
     }
     return false;
   }

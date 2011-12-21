@@ -38,15 +38,15 @@ public class ParityFilePair {
   /**
    * Returns the Path to the parity file of a given file
    *
-   * @param code The ErasureCodeType of the parity
+   * @param codec The Codec of the parity
    * @param srcPath Path to the original source file
    * @return ParityFilePair representing the parity file of the source
    * @throws IOException
    */
-  public static ParityFilePair getParityFile(ErasureCodeType code, Path srcPath,
+  public static ParityFilePair getParityFile(Codec codec, Path srcPath,
       Configuration conf) throws IOException {
 
-    Path destPathPrefix = RaidNode.getDestinationPath(code, conf);
+    Path destPathPrefix = new Path(codec.parityDirectory);
     Path srcParent = srcPath.getParent();
 
     FileSystem fsDest = destPathPrefix.getFileSystem(conf);
@@ -81,7 +81,7 @@ public class ParityFilePair {
       fsHar.initialize(inHarPath.toUri(), conf);
       FileStatus inHar = FileStatusCache.get(fsHar, inHarPath);
       if (inHar != null) {
-        if (verifyParity(srcStatus, inHar, code, conf)) {
+        if (verifyParity(srcStatus, inHar, codec, conf)) {
           return new ParityFilePair(inHarPath, inHar, fsHar);
         }
       }
@@ -90,7 +90,7 @@ public class ParityFilePair {
     //CASE 2: CHECK PARITY
     try {
       FileStatus outHar = fsDest.getFileStatus(outPath);
-      if (verifyParity(srcStatus, outHar, code, conf)) {
+      if (verifyParity(srcStatus, outHar, codec, conf)) {
         return new ParityFilePair(outPath, outHar, fsDest);
       }
     } catch (java.io.FileNotFoundException e) {
@@ -100,13 +100,12 @@ public class ParityFilePair {
   }
 
   static boolean verifyParity(FileStatus src, FileStatus parity,
-      ErasureCodeType code, Configuration conf) {
+      Codec codec, Configuration conf) {
     if (parity.getModificationTime() != src.getModificationTime()) {
       return false;
     }
-    int stripeLength = RaidNode.getStripeLength(conf);
-    int parityLegnth = ErasureCodeType.XOR == code ? 1 :
-        RaidNode.rsParityLength(conf);
+    int stripeLength = codec.stripeLength;
+    int parityLegnth = codec.parityLength;
     double sourceBlocks = Math.ceil(
         ((double)src.getLen()) / src.getBlockSize());
     int parityBlocks = (int)Math.ceil(

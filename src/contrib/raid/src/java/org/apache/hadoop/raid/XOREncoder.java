@@ -103,6 +103,6 @@ public class XOREncoder extends Encoder {
 
   @Override
   public Path getParityTempPath() {
-    return new Path(RaidNode.xorTempPrefix(conf));
+    return new Path(Codec.getCodec("xor").tmpParityDirectory);
   }
 }

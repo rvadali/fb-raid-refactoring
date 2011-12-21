@@ -75,26 +75,6 @@ public abstract class RaidNode implements RaidProtocol {
   public static final Log LOG = LogFactory.getLog(RaidNode.class);
   public static final long SLEEP_TIME = 10000L; // 10 seconds
   public static final int DEFAULT_PORT = 60000;
-  // Default stripe length = 5, parity length for RS code = 3
-  public static final int DEFAULT_STRIPE_LENGTH = 5;
-  public static final int RS_PARITY_LENGTH_DEFAULT = 3;
-
-  public static final String RS_PARITY_LENGTH_KEY = "hdfs.raidrs.paritylength";
-  public static final String STRIPE_LENGTH_KEY = "hdfs.raid.stripeLength";
-
-  public static final String DEFAULT_RAID_LOCATION = "/raid";
-  public static final String RAID_LOCATION_KEY = "hdfs.raid.locations";
-  public static final String DEFAULT_RAID_TMP_LOCATION = "/tmp/raid";
-  public static final String RAID_TMP_LOCATION_KEY = "fs.raid.tmpdir";
-  public static final String DEFAULT_RAID_HAR_TMP_LOCATION = "/tmp/raid_har";
-  public static final String RAID_HAR_TMP_LOCATION_KEY = "fs.raid.hartmpdir";
-
-  public static final String DEFAULT_RAIDRS_LOCATION = "/raidrs";
-  public static final String RAIDRS_LOCATION_KEY = "hdfs.raidrs.locations";
-  public static final String DEFAULT_RAIDRS_TMP_LOCATION = "/tmp/raidrs";
-  public static final String RAIDRS_TMP_LOCATION_KEY = "fs.raidrs.tmpdir";
-  public static final String DEFAULT_RAIDRS_HAR_TMP_LOCATION = "/tmp/raidrs_har";
-  public static final String RAIDRS_HAR_TMP_LOCATION_KEY = "fs.raidrs.hartmpdir";
 
   public static final String RAID_RECOVERY_LOCATION_KEY =
     "hdfs.raid.local.recovery.location";
@@ -756,8 +736,8 @@ public abstract class RaidNode implements RaidProtocol {
       throws IOException {
     int targetRepl = Integer.parseInt(info.getProperty("targetReplication"));
     int metaRepl = Integer.parseInt(info.getProperty("metaReplication"));
-    int stripeLength = getStripeLength(conf);
-    Path destPref = getDestinationPath(info.getErasureCode(), conf);
+    Codec codec = Codec.getCodec(info.getCodecId());
+    Path destPref = new Path(codec.parityDirectory);
     String simulate = info.getProperty("simulate");
     boolean doSimulate = simulate == null ? false : Boolean
         .parseBoolean(simulate);
@@ -766,9 +746,9 @@ public abstract class RaidNode implements RaidProtocol {
     int count = 0;
 
     for (FileStatus s : paths) {
-      doRaid(conf, s, destPref, info.getErasureCode(), statistics,
+      doRaid(conf, s, destPref, codec, statistics,
                  RaidUtils.NULL_PROGRESSABLE,
-                 doSimulate, targetRepl, metaRepl, stripeLength);
+                 doSimulate, targetRepl, metaRepl);
       if (count % 1000 == 0) {
         LOG.info("RAID statistics " + statistics.toString());
       }
@@ -787,24 +767,24 @@ public abstract class RaidNode implements RaidProtocol {
     throws IOException {
     int targetRepl = Integer.parseInt(info.getProperty("targetReplication"));
     int metaRepl = Integer.parseInt(info.getProperty("metaReplication"));
-    int stripeLength = getStripeLength(conf);
     
-    Path destPref = getDestinationPath(info.getErasureCode(), conf);
+    Codec codec = Codec.getCodec(info.getCodecId());
+    Path destPref = new Path(codec.parityDirectory);
     String simulate = info.getProperty("simulate");
     boolean doSimulate = simulate == null ? false : Boolean
         .parseBoolean(simulate);
 
-    return doRaid(conf, src, destPref, info.getErasureCode(), statistics,
-                  reporter, doSimulate, targetRepl, metaRepl, stripeLength);
+    return doRaid(conf, src, destPref, codec, statistics,
+                  reporter, doSimulate, targetRepl, metaRepl);
   }
 
   /**
    * RAID an individual file
    */
   public static boolean doRaid(Configuration conf, FileStatus stat,
-      Path destPath, ErasureCodeType code, Statistics statistics,
-      Progressable reporter, boolean doSimulate, int targetRepl, int metaRepl,
-      int stripeLength) throws IOException {
+      Path destPath, Codec codec, Statistics statistics,
+      Progressable reporter, boolean doSimulate, int targetRepl, int metaRepl)
+        throws IOException {
     Path p = stat.getPath();
     FileSystem srcFs = p.getFileSystem(conf);
 
@@ -825,8 +805,8 @@ public abstract class RaidNode implements RaidProtocol {
     statistics.processedSize += diskSpace;
 
     // generate parity file
-    generateParityFile(conf, stat, targetRepl, reporter, srcFs, destPath, code, locations,
-                       metaRepl, stripeLength);
+    generateParityFile(conf, stat, targetRepl, reporter, srcFs, destPath, codec, locations,
+                       metaRepl);
     if (!doSimulate) {
       if (srcFs.setReplication(p, (short)targetRepl) == false) {
         LOG.info("Error in reducing replication of " + p + " to " + targetRepl);
@@ -842,8 +822,8 @@ public abstract class RaidNode implements RaidProtocol {
     statistics.remainingSize += diskSpace;
 
     // the metafile will have this many number of blocks
-    int numMeta = locations.length / stripeLength;
-    if (locations.length % stripeLength != 0) {
+    int numMeta = locations.length / codec.stripeLength;
+    if (locations.length % codec.stripeLength != 0) {
       numMeta++;
     }
 
@@ -863,9 +843,9 @@ public abstract class RaidNode implements RaidProtocol {
                                   Progressable reporter,
                                   FileSystem inFs,
                                   Path destPathPrefix,
-                                  ErasureCodeType code,
+                                  Codec codec,
                                   BlockLocation[] locations,
-                                  int metaRepl, int stripeLength) throws IOException {
+                                  int metaRepl) throws IOException {
 
     Path inpath = stat.getPath();
     Path outpath =  getOriginalParityFile(destPathPrefix, inpath);
@@ -886,7 +866,7 @@ public abstract class RaidNode implements RaidProtocol {
       // ignore errors because the raid file might not exist yet.
     }
 
-    Encoder encoder = encoderForCode(conf, code);
+    Encoder encoder = encoderForCodec(codec);
     encoder.encodeFile(inFs, inpath, outFs, outpath, (short)metaRepl, reporter);
 
     // set the modification time of the RAID file. This is done so that the modTime of the
@@ -915,12 +895,11 @@ public abstract class RaidNode implements RaidProtocol {
   }
 
   public static Path unRaidCorruptBlock(Configuration conf, Path srcPath,
-    ErasureCodeType code, Decoder decoder, int stripeLength,
-      long corruptOffset, FileSystem recoveryFs) throws IOException {
+    Codec codec, long corruptOffset, FileSystem recoveryFs) throws IOException {
     // Test if parity file exists
-    ParityFilePair ppair = ParityFilePair.getParityFile(code, srcPath, conf);
+    ParityFilePair ppair = ParityFilePair.getParityFile(codec, srcPath, conf);
     if (ppair == null) {
-      LOG.warn("Could not find " + code + " parity file for " + srcPath);
+      LOG.warn("Could not find " + codec.id + " parity file for " + srcPath);
       return null;
     }
 
@@ -936,6 +915,7 @@ public abstract class RaidNode implements RaidProtocol {
     FileStatus stat = srcFs.getFileStatus(srcPath);
     long limit = Math.min(stat.getBlockSize(), stat.getLen() - corruptOffset);
     java.io.OutputStream out = recoveryFs.create(recoveredBlock);
+    Decoder decoder = decoderForCodec(codec);
     try {
       decoder.fixErasedBlock(srcFs, srcPath,
           ppair.getFileSystem(), ppair.getPath(),
@@ -971,14 +951,14 @@ public abstract class RaidNode implements RaidProtocol {
       prevExec = now();
       
       // fetch all categories
-      for (ErasureCodeType code: ErasureCodeType.values()) {
+      for (Codec codec : Codec.getCodecs()) {
         try {
-          String tmpHarPath = tmpHarPathForCode(conf, code);
+          String tmpHarPath = codec.tmpHarDirectory;
           int harThresold = conf.getInt(RAID_PARITY_HAR_THRESHOLD_DAYS_KEY,
             DEFAULT_RAID_PARITY_HAR_THRESHOLD_DAYS);
           long cutoff = now() - ( harThresold * 24L * 3600000L );
 
-          Path destPref = getDestinationPath(code, conf);
+          Path destPref = new Path(codec.parityDirectory);
           FileSystem destFs = destPref.getFileSystem(conf);
           FileStatus destStat = null;
           try {
@@ -988,7 +968,7 @@ public abstract class RaidNode implements RaidProtocol {
           }
 
           LOG.info("Haring parity files in " + destPref);
-          recurseHar(code, destFs, destStat, destPref.toUri().getPath(),
+          recurseHar(codec, destFs, destStat, destPref.toUri().getPath(),
             destFs, cutoff, tmpHarPath);
         } catch (Exception e) {
           LOG.warn("Ignoring Exception while haring ", e);
@@ -998,7 +978,7 @@ public abstract class RaidNode implements RaidProtocol {
     return;
   }
   
-  void recurseHar(ErasureCodeType code, FileSystem destFs, FileStatus dest,
+  void recurseHar(Codec codec, FileSystem destFs, FileStatus dest,
       String destPrefix, FileSystem srcFs, long cutoff, String tmpHarPath)
     throws IOException {
 
@@ -1027,7 +1007,7 @@ public abstract class RaidNode implements RaidProtocol {
       shouldHar = files.length > 0;
       for (FileStatus one: files) {
         if (one.isDir()){
-          recurseHar(code, destFs, one, destPrefix, srcFs, cutoff, tmpHarPath);
+          recurseHar(codec, destFs, one, destPrefix, srcFs, cutoff, tmpHarPath);
           shouldHar = false;
         } else if (one.getModificationTime() > cutoff ) {
           if (shouldHar) {
@@ -1060,7 +1040,7 @@ public abstract class RaidNode implements RaidProtocol {
         Path destPathPrefix = new Path(destPrefix).makeQualified(destFs);
         if (statuses != null) {
           for (FileStatus status : statuses) {
-            if (ParityFilePair.getParityFile(code,
+            if (ParityFilePair.getParityFile(codec,
                 status.getPath().makeQualified(srcFs), conf) == null ) {
               LOG.debug("Cannot archive " + destPath + 
                   " because it doesn't contain parity file for " +
@@ -1077,12 +1057,12 @@ public abstract class RaidNode implements RaidProtocol {
 
     if ( shouldHar ) {
       LOG.info("Archiving " + dest.getPath() + " to " + tmpHarPath );
-      singleHar(code, destFs, dest, tmpHarPath, harBlockSize, harReplication);
+      singleHar(codec, destFs, dest, tmpHarPath, harBlockSize, harReplication);
     }
   } 
 
   
-  private void singleHar(ErasureCodeType code, FileSystem destFs,
+  private void singleHar(Codec codec, FileSystem destFs,
        FileStatus dest, String tmpHarPath, long harBlockSize,
        short harReplication) throws IOException {
     
@@ -1146,140 +1126,14 @@ public abstract class RaidNode implements RaidProtocol {
     }
   }
 
-  /**
-   * Return the temp path for XOR parity files
-   */
-  public static String xorTempPrefix(Configuration conf) {
-    return conf.get(RAID_TMP_LOCATION_KEY, DEFAULT_RAID_TMP_LOCATION);
+  static Encoder encoderForCodec(Codec codec) {
+    // TODO: implement this
+    return null;
   }
 
-  /**
-   * Return the temp path for ReedSolomonEncoder parity files
-   */
-  public static String rsTempPrefix(Configuration conf) {
-    return conf.get(RAIDRS_TMP_LOCATION_KEY, DEFAULT_RAIDRS_TMP_LOCATION);
-  }
-
-  /**
-   * Return the temp path for XOR parity files
-   */
-  public static String xorHarTempPrefix(Configuration conf) {
-    return conf.get(RAID_HAR_TMP_LOCATION_KEY, DEFAULT_RAID_HAR_TMP_LOCATION);
-  }
-
-  /**
-   * Return the temp path for ReedSolomonEncoder parity files
-   */
-  public static String rsHarTempPrefix(Configuration conf) {
-    return conf.get(RAIDRS_HAR_TMP_LOCATION_KEY,
-        DEFAULT_RAIDRS_HAR_TMP_LOCATION);
-  }
-
-  /**
-   * Return the destination path for ReedSolomon parity files
-   */
-  public static Path rsDestinationPath(Configuration conf, FileSystem fs) {
-    String loc = conf.get(RAIDRS_LOCATION_KEY, DEFAULT_RAIDRS_LOCATION);
-    Path p = new Path(loc.trim());
-    p = p.makeQualified(fs);
-    return p;
-  }
-
-  /**
-   * Return the destination path for ReedSolomon parity files
-   */
-  public static Path rsDestinationPath(Configuration conf)
-    throws IOException {
-    String loc = conf.get(RAIDRS_LOCATION_KEY, DEFAULT_RAIDRS_LOCATION);
-    Path p = new Path(loc.trim());
-    FileSystem fs = FileSystem.get(p.toUri(), conf);
-    p = p.makeQualified(fs);
-    return p;
-  }
-
-  /**
-   * Return the destination path for XOR parity files
-   */
-  public static Path xorDestinationPath(Configuration conf, FileSystem fs) {
-    String loc = conf.get(RAID_LOCATION_KEY, DEFAULT_RAID_LOCATION);
-    Path p = new Path(loc.trim());
-    p = p.makeQualified(fs);
-    return p;
-  }
-
-  /**
-   * Return the destination path for XOR parity files
-   */
-  public static Path xorDestinationPath(Configuration conf)
-    throws IOException {
-    String loc = conf.get(RAID_LOCATION_KEY, DEFAULT_RAID_LOCATION);
-    Path p = new Path(loc.trim());
-    FileSystem fs = FileSystem.get(p.toUri(), conf);
-    p = p.makeQualified(fs);
-    return p;
-  }
-
-  /**
-   * Return the path prefix that stores the parity files
-   */
-  public static Path getDestinationPath(
-      ErasureCodeType code, Configuration conf) throws IOException {
-    switch (code) {
-      case XOR:
-        return xorDestinationPath(conf);
-      case RS:
-        return rsDestinationPath(conf);
-      default:
-        return null;
-    }
-  }
-
-  public static int parityLength(ErasureCodeType code, Configuration conf) {
-    switch (code) {
-    case XOR:
-        return 1;
-    case RS:
-        return rsParityLength(conf);
-    default:
-        return -1;
-    }
-  }
-
-  static Encoder encoderForCode(Configuration conf, ErasureCodeType code) {
-    int stripeLength = getStripeLength(conf);
-    switch (code) {
-      case XOR:
-        return new XOREncoder(conf, stripeLength);
-      case RS:
-        return new ReedSolomonEncoder(conf, stripeLength, rsParityLength(conf));
-      default:
-        return null;
-    }
-  }
-
-  static String tmpHarPathForCode(Configuration conf, ErasureCodeType code) {
-    switch (code) {
-      case XOR:
-        return xorHarTempPrefix(conf);
-      case RS:
-        return rsHarTempPrefix(conf);
-      default:
-        return null;
-    }
-  }
-
-  /**
-   * Obtain stripe length from configuration
-   */
-  public static int getStripeLength(Configuration conf) {
-    return conf.getInt(STRIPE_LENGTH_KEY, DEFAULT_STRIPE_LENGTH);
-  }
-
-  /**
-   * Obtain stripe length from configuration
-   */
-  public static int rsParityLength(Configuration conf) {
-    return conf.getInt(RS_PARITY_LENGTH_KEY, RS_PARITY_LENGTH_DEFAULT);
+  static Decoder decoderForCodec(Codec codec) {
+    // TODO: implemnet this
+    return null;
   }
 
   static boolean isParityHarPartFile(Path p) {

@@ -65,6 +65,10 @@ public abstract class Encoder {
     public void write(byte[] b, int off, int len) throws IOException {}
   }
 
+  Encoder(Configuration conf, Codec codec) {
+    // TODO: implement this
+  }
+
   Encoder(
     Configuration conf, int stripeSize, int paritySize) {
     this.conf = conf;

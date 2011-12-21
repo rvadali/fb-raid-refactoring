@@ -33,29 +33,30 @@ import java.util.Random;
 import java.util.Set;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.permission.FsPermission;
+import org.apache.hadoop.fs.BlockMissingException;
 import org.apache.hadoop.fs.ChecksumException;
-import org.apache.hadoop.fs.FSDataOutputStream;
-import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.FilterFileSystem;
 import org.apache.hadoop.fs.FSDataInputStream;
+import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FSInputStream;
 import org.apache.hadoop.fs.BlockMissingException;
 import org.apache.hadoop.fs.LocalFileSystem;
 import org.apache.hadoop.fs.LocatedFileStatus;
-import org.apache.hadoop.fs.RemoteIterator;
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.PathFilter;
+import org.apache.hadoop.fs.permission.FsPermission;
+import org.apache.hadoop.fs.RemoteIterator;
 import org.apache.hadoop.hdfs.DistributedFileSystem;
-import org.apache.hadoop.util.Progressable;
-import org.apache.hadoop.util.StringUtils;
-import org.apache.hadoop.util.ReflectionUtils;
+import org.apache.hadoop.raid.Codec;
 import org.apache.hadoop.raid.Decoder;
-import org.apache.hadoop.raid.ErasureCodeType;
 import org.apache.hadoop.raid.RaidNode;
 import org.apache.hadoop.raid.ReedSolomonDecoder;
 import org.apache.hadoop.raid.XORDecoder;
+import org.apache.hadoop.util.Progressable;
+import org.apache.hadoop.util.ReflectionUtils;
+import org.apache.hadoop.util.StringUtils;
 
 /**
  * This is an implementation of the Hadoop  RAID Filesystem. This FileSystem 
@@ -67,42 +68,13 @@ import org.apache.hadoop.raid.XORDecoder;
 public class DistributedRaidFileSystem extends FilterFileSystem {
   public static final int SKIP_BUF_SIZE = 2048;
 
-  // these are alternate locations that can be used for read-only access
-  DecodeInfo[] alternates;
   Configuration conf;
-  int stripeLength;
 
   DistributedRaidFileSystem() throws IOException {
   }
 
   DistributedRaidFileSystem(FileSystem fs) throws IOException {
     super(fs);
-    alternates = null;
-    stripeLength = 0;
-  }
-
-  // Information required for decoding a source file
-  static private class DecodeInfo {
-    final Path destPath;
-    final ErasureCodeType type;
-    final Configuration conf;
-    final int stripeLength;
-    private DecodeInfo(Configuration conf, ErasureCodeType type, Path destPath) {
-      this.conf = conf;
-      this.type = type;
-      this.destPath = destPath;
-      this.stripeLength = RaidNode.getStripeLength(conf);
-    }
-
-    Decoder createDecoder() {
-      if (this.type == ErasureCodeType.XOR) {
-        return new XORDecoder(conf, stripeLength);
-      } else if (this.type == ErasureCodeType.RS) {
-        return new ReedSolomonDecoder(conf, stripeLength,
-                              RaidNode.rsParityLength(conf));
-      }
-      return null;
-    }
   }
 
   /* Initialize a Raid FileSystem
@@ -118,21 +90,6 @@ public class DistributedRaidFileSystem extends FilterFileSystem {
     
     this.fs = (FileSystem)ReflectionUtils.newInstance(clazz, null); 
     super.initialize(name, conf);
-    
-    // find stripe length configured
-    stripeLength = RaidNode.getStripeLength(conf);
-    if (stripeLength == 0) {
-      LOG.info("dfs.raid.stripeLength is incorrectly defined to be " + 
-               stripeLength + " Ignoring...");
-      return;
-    }
-
-    // Put XOR and RS in alternates
-    alternates= new DecodeInfo[2];
-    Path xorPath = RaidNode.xorDestinationPath(conf, fs);
-    alternates[0] = new DecodeInfo(conf, ErasureCodeType.XOR, xorPath);
-    Path rsPath = RaidNode.rsDestinationPath(conf, fs);
-    alternates[1] = new DecodeInfo(conf, ErasureCodeType.RS, rsPath);
   }
 
   /*
@@ -146,8 +103,8 @@ public class DistributedRaidFileSystem extends FilterFileSystem {
   public FSDataInputStream open(Path f, int bufferSize) throws IOException {
     FileStatus stat = getFileStatus(f);
     if (stat.getLen() > 0) {
-      ExtFSDataInputStream fd = new ExtFSDataInputStream(conf, this, alternates, f,
-                                                  stat, stripeLength, bufferSize);
+      ExtFSDataInputStream fd = new ExtFSDataInputStream(
+          conf, this, f, stat, bufferSize);
       return fd;
     } else {
       return fs.open(f, bufferSize);
@@ -208,15 +165,12 @@ public class DistributedRaidFileSystem extends FilterFileSystem {
       private Path path;
       private FileStatus stat;
       private long fileSize;
-      private final DecodeInfo[] alternates;
       private final int buffersize;
       private final Configuration conf;
-      private final int stripeLength;
       private Set<Path> recoveredPaths = new HashSet<Path>();
 
       ExtFsInputStream(Configuration conf, DistributedRaidFileSystem lfs,
-          DecodeInfo[] alternates, Path path, FileStatus stat,
-          int stripeLength, int buffersize) throws IOException {
+          Path path, FileStatus stat, int buffersize) throws IOException {
         this.path = path;
         this.nextLocation = 0;
         // Construct array of blocks in file.
@@ -236,7 +190,6 @@ public class DistributedRaidFileSystem extends FilterFileSystem {
         }
         this.currentOffset = 0;
         this.currentBlock = null;
-        this.alternates = alternates;
         this.buffersize = buffersize;
         this.conf = conf;
         this.lfs = lfs;
@@ -247,7 +200,6 @@ public class DistributedRaidFileSystem extends FilterFileSystem {
         } else {
           this.recoverFs = lfs.fs;
         }
-        this.stripeLength = stripeLength;
         // Open a stream to the first block.
         openCurrentStream();
       }
@@ -490,9 +442,11 @@ public class DistributedRaidFileSystem extends FilterFileSystem {
        */
       private void setAlternateLocations(IOException curexp, long offset) 
         throws IOException {
-        while (alternates != null && nextLocation < alternates.length) {
+        while (nextLocation < Codec.getCodecs().size()) {
           try {
             int idx = nextLocation++;
+            Codec codec = Codec.getCodecs().get(idx);
+
             // Start offset of block.
             long corruptOffset =
               (offset / stat.getBlockSize()) * stat.getBlockSize();
@@ -504,10 +458,7 @@ public class DistributedRaidFileSystem extends FilterFileSystem {
             // Disable caching so that a previously cached RaidDfs is not used.
             clientConf.setBoolean("fs.hdfs.impl.disable.cache", true);
             Path npath = RaidNode.unRaidCorruptBlock(clientConf, path,
-                         alternates[idx].type,
-                         alternates[idx].createDecoder(),
-                         stripeLength, corruptOffset, recoverFs);
-
+                codec, corruptOffset, recoverFs);
             try{
               String outdir = conf.get("fs.raid.recoverylogdir");
               if (outdir != null) {
@@ -521,8 +472,8 @@ public class DistributedRaidFileSystem extends FilterFileSystem {
                 PrintStream ps = new PrintStream(dout);
                 ps.println("Recovery attempt log");
                 ps.println("Source path : " + path );
-                ps.println("Alternate path : " + alternates[idx].destPath);
-                ps.println("Stripe lentgh : " + stripeLength);
+                ps.println("Alternate path : " + codec.parityDirectory);
+                ps.println("Stripe lentgh : " + codec.stripeLength);
                 ps.println("Corrupt offset : " + corruptOffset);
                 String output = (npath==null) ? "UNSUCCESSFUL" : npath.toString();
                 ps.println("Output from unRaid : " + output);
@@ -581,10 +532,8 @@ public class DistributedRaidFileSystem extends FilterFileSystem {
      * @throws IOException
      */
     public ExtFSDataInputStream(Configuration conf, DistributedRaidFileSystem lfs,
-      DecodeInfo[] alternates, Path p, FileStatus stat,
-      int stripeLength, int buffersize) throws IOException {
-        super(new ExtFsInputStream(conf, lfs, alternates, p, stat,
-            stripeLength, buffersize));
+        Path p, FileStatus stat, int buffersize) throws IOException {
+        super(new ExtFsInputStream(conf, lfs, p, stat, buffersize));
     }
   }
 

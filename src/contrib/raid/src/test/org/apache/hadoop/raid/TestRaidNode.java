@@ -76,7 +76,6 @@ public class TestRaidNode extends TestCase {
     new File(TEST_DIR).mkdirs(); // Make sure data directory exists
     conf = new Configuration();
     conf.set("raid.config.file", CONFIG_FILE);
-    conf.set(RaidNode.RAID_LOCATION_KEY, "/destraid");
     conf.setBoolean("raid.config.reload", true);
     conf.setLong("raid.config.reload.interval", RELOAD_INTERVAL);
 
@@ -142,7 +141,7 @@ public class TestRaidNode extends TestCase {
       String str =
           "<policy name = \"" + name + "\"> " +
              "<srcPath/> " +
-             "<erasureCode>xor</erasureCode> " +
+             "<codecId>xor</codecId> " +
              "<property> " +
                "<name>srcReplication</name> " +
                "<value>" + srcReplication + "</value> " +
@@ -183,7 +182,7 @@ public class TestRaidNode extends TestCase {
       String str =
           "<policy name = \"" + name + "\"> " +
             "<srcPath prefix=\"" + path + "\"/> " +
-             "<erasureCode>xor</erasureCode> " +
+             "<codecId>xor</codecId> " +
              "<property> " +
                "<name>srcReplication</name> " +
                "<value>" + srcReplication + "</value> " +
@@ -285,7 +284,7 @@ public class TestRaidNode extends TestCase {
     Path file1 = new Path(dir + "/file" + iter);
     RaidNode cnode = null;
     try {
-      Path destPath = new Path("/destraid/user/dhruba/raidtest");
+      Path destPath = new Path("/raid/user/dhruba/raidtest");
       fileSys.delete(dir, true);
       fileSys.delete(destPath, true);
       long crc1 = createOldFile(fileSys, file1, 1, numBlock, blockSize);
@@ -293,7 +292,6 @@ public class TestRaidNode extends TestCase {
 
       // create an instance of the RaidNode
       Configuration localConf = new Configuration(conf);
-      localConf.set(RaidNode.RAID_LOCATION_KEY, "/destraid");
       cnode = RaidNode.createRaidNode(null, localConf);
       FileStatus[] listPaths = null;
 
@@ -385,13 +383,12 @@ public class TestRaidNode extends TestCase {
     Path file2 = new Path(dir + "/file2");
     RaidNode cnode = null;
     try {
-      Path destPath = new Path("/destraid/user/dhruba/policytest");
+      Path destPath = new Path("/raid/user/dhruba/policytest");
       fileSys.delete(dir, true);
       fileSys.delete(destPath, true);
 
       // create an instance of the RaidNode
       Configuration localConf = new Configuration(conf);
-      localConf.set(RaidNode.RAID_LOCATION_KEY, "/destraid");
       cnode = RaidNode.createRaidNode(null, localConf);
 
       // this file should be picked up RaidNode
@@ -501,12 +498,11 @@ public class TestRaidNode extends TestCase {
 
     RaidNode cnode = null;
     try {
-      createTestFiles("/user/dhruba/raidtest/", "/destraid/user/dhruba/raidtest");
-      createTestFiles("/user/dhruba/raidtest2/", "/destraid/user/dhruba/raidtest2");
+      createTestFiles("/user/dhruba/raidtest/", "/raid/user/dhruba/raidtest");
+      createTestFiles("/user/dhruba/raidtest2/", "/raid/user/dhruba/raidtest2");
       LOG.info("Test testDistRaid created test files");
 
       Configuration localConf = new Configuration(conf);
-      localConf.set(RaidNode.RAID_LOCATION_KEY, "/destraid");
       cnode = RaidNode.createRaidNode(null, localConf);
       // Verify the policies are parsed correctly
       for (PolicyInfo p: cnode.getAllPolicies()) {
@@ -520,7 +516,7 @@ public class TestRaidNode extends TestCase {
             assertTrue(p.getSrcPath().equals(
                 srcPath.makeQualified(srcPath.getFileSystem(conf))));
           }
-          assertTrue(p.getErasureCode() == ErasureCodeType.XOR);
+          assertTrue(p.getCodecId().equals("xor"));
           assertEquals(targetReplication,
                        Integer.parseInt(p.getProperty("targetReplication")));
           assertEquals(metaReplication,
@@ -645,7 +641,7 @@ public class TestRaidNode extends TestCase {
     RaidNode cnode = null;
     try {
       fileSys.delete(new Path("/user/dhruba/raidtest"), true);
-      fileSys.delete(new Path("/destraid/user/dhruba/raidtest"), true);
+      fileSys.delete(new Path("/raid/user/dhruba/raidtest"), true);
       for(int i = 0; i < 12; i++){
         Path file = new Path("/user/dhruba/raidtest/dir" + i + "/file" + i);
         createOldFile(fileSys, file, 1, 7, 1024L);
@@ -654,7 +650,6 @@ public class TestRaidNode extends TestCase {
       LOG.info("Test testSuspendTraversal created test files");
 
       Configuration localConf = new Configuration(conf);
-      localConf.set(RaidNode.RAID_LOCATION_KEY, "/destraid");
       localConf.setInt("raid.distraid.max.jobs", 3);
       localConf.setInt("raid.distraid.max.files", 3);
       localConf.setInt("raid.directorytraversal.threads", 1);
@@ -724,7 +719,7 @@ public class TestRaidNode extends TestCase {
     RaidNode cnode = null;
     Path fileListPath = new Path("/user/rvadali/raidfilelist.txt");
     try {
-      createTestFiles("/user/rvadali/raidtest/", "/destraid/user/rvadali/raidtest");
+      createTestFiles("/user/rvadali/raidtest/", "/raid/user/rvadali/raidtest");
       LOG.info("Test testFileListPolicy created test files");
 
       // Create list of files to raid.
@@ -752,7 +747,7 @@ public class TestRaidNode extends TestCase {
       assertEquals(numJobsExpected, dcnode.jobMonitor.jobsSucceeded());
 
       FileStatus[] parityFiles = fileSys.listStatus(
-        new Path("/destraid/user/rvadali/raidtest"));
+        new Path("/raid/user/rvadali/raidtest"));
       assertEquals(files.length, parityFiles.length);
       LOG.info("Test testFileListPolicy successful.");
 

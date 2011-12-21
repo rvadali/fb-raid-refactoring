@@ -158,16 +158,16 @@ public enum RaidState {
         return NOT_RAIDED_NO_POLICY;
       }
       if (file.getReplication() == matched.targetReplication) {
-        if (skipParityCheck || parityExists(file, matched.code)) {
+        if (skipParityCheck || parityExists(file, matched.codec)) {
           return RAIDED;
         }
       }
       return NOT_RAIDED_BUT_SHOULD;
     }
 
-    private boolean parityExists(FileStatus src, ErasureCodeType code)
+    private boolean parityExists(FileStatus src, Codec codec)
     throws IOException {
-      return ParityFilePair.getParityFile(code, src.getPath(), conf) != null;
+      return ParityFilePair.getParityFile(codec, src.getPath(), conf) != null;
     }
 
     private static int computeNumBlocks(FileStatus status) {

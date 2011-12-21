@@ -115,7 +115,7 @@ public class ReedSolomonEncoder extends Encoder {
 
   @Override
   public Path getParityTempPath() {
-    return new Path(RaidNode.rsTempPrefix(conf));
+    return new Path(Codec.getCodec("rs").parityDirectory);
   }
 
 }

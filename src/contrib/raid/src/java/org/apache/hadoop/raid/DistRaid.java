@@ -347,9 +347,9 @@ public class DistRaid {
 
    private void estimateSavings() {
      for (RaidPolicyPathPair p : raidPolicyPathPairList) {
-       ErasureCodeType code = p.policy.getErasureCode();
-       int stripeSize = RaidNode.getStripeLength(jobconf);
-       int paritySize = RaidNode.parityLength(code, jobconf);
+       Codec codec = Codec.getCodec(p.policy.getCodecId());
+       int stripeSize = codec.stripeLength;
+       int paritySize = codec.parityLength;
        int targetRepl = Integer.parseInt(p.policy.getProperty("targetReplication"));
        int parityRepl = Integer.parseInt(p.policy.getProperty("metaReplication"));
        for (FileStatus st : p.srcPaths) {

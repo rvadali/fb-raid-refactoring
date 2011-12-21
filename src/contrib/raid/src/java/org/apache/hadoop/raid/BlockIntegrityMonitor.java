@@ -204,30 +204,18 @@ public abstract class BlockIntegrityMonitor extends Configured {
     numFilesCopied += incr;
   }
 
-  static boolean isSourceFile(String p, String[] destPrefixes) {
-    for (String destPrefix: destPrefixes) {
-      if (p.startsWith(destPrefix)) {
+  static boolean isSourceFile(String p) {
+    for (Codec c : Codec.getCodecs()) {
+      if (p.startsWith(c.parityDirectory)) {
+        // This is a parity file
         return false;
       }
     }
     return true;
   }
 
-  String[] destPrefixes() throws IOException {
-    String xorPrefix = RaidNode.xorDestinationPath(getConf()).toUri().getPath();
-    if (!xorPrefix.endsWith(Path.SEPARATOR)) {
-      xorPrefix += Path.SEPARATOR;
-    }
-    String rsPrefix = RaidNode.rsDestinationPath(getConf()).toUri().getPath();
-    if (!rsPrefix.endsWith(Path.SEPARATOR)) {
-      rsPrefix += Path.SEPARATOR;
-    }
-    return new String[]{xorPrefix, rsPrefix};
-  }
-
   static boolean doesParityDirExist(
-      FileSystem parityFs, String path, String[] destPrefixes)
-      throws IOException {
+      FileSystem parityFs, String path) throws IOException {
     // Check if it is impossible to have a parity file. We check if the
     // parent directory of the lost file exists under a parity path.
     // If the directory does not exist, the parity file cannot exist.
@@ -237,8 +225,8 @@ public abstract class BlockIntegrityMonitor extends Configured {
       parentUriPath = parentUriPath.substring(1);
     }
     boolean parityCanExist = false;
-    for (String destPrefix: destPrefixes) {
-      Path parityDir = new Path(destPrefix, parentUriPath);
+    for (Codec c : Codec.getCodecs()) {
+      Path parityDir = new Path(c.parityDirectory, parentUriPath);
       if (parityFs.exists(parityDir)) {
         parityCanExist = true;
         break;
@@ -250,11 +238,10 @@ public abstract class BlockIntegrityMonitor extends Configured {
   void filterUnreconstructableSourceFiles(FileSystem parityFs, 
       Iterator<String> it)
       throws IOException {
-    String[] destPrefixes = destPrefixes();
     while (it.hasNext()) {
       String p = it.next();
-      if (isSourceFile(p, destPrefixes) &&
-          !doesParityDirExist(parityFs, p, destPrefixes)) {
+      if (isSourceFile(p) &&
+          !doesParityDirExist(parityFs, p)) {
           it.remove();
       }
     }

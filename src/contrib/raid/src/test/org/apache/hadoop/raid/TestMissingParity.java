@@ -92,9 +92,10 @@ public class TestMissingParity extends TestCase {
     new File(TEST_DIR).mkdirs(); // Make sure data directory exists
     conf = new Configuration();
     conf.set("raid.config.file", CONFIG_FILE);
-    conf.set(RaidNode.RAID_LOCATION_KEY, "/destraid");
     conf.setBoolean("raid.config.reload", true);
     conf.setLong("raid.config.reload.interval", RELOAD_INTERVAL);
+
+    Utils.loadTestCodecs();
 
     // scan all policies once every 100 second
     conf.setLong("raid.policy.rescan.interval", 100 * 1000L);
@@ -119,8 +120,9 @@ public class TestMissingParity extends TestCase {
     dfs = new MiniDFSCluster(conf, 6, true, null);
     dfs.waitActive();
     fileSys = dfs.getFileSystem();
-    root = RaidNode.getDestinationPath(ErasureCodeType.XOR, conf).getParent();
-    Path raidRoot = RaidNode.getDestinationPath(ErasureCodeType.XOR, conf);
+
+    Path raidRoot = new Path(Codec.getCodec("xor").parityDirectory);
+    root = raidRoot.getParent();
     String file1 = "/p1/f1.txt";
     String file2 = "/p1/f2.txt";
     String file3 = "/p2/f3.txt";

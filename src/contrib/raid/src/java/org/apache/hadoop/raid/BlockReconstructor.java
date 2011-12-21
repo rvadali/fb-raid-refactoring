@@ -55,61 +55,30 @@ abstract class BlockReconstructor extends Configured {
 
   public static final Log LOG = LogFactory.getLog(BlockReconstructor.class);
 
-  private String xorPrefix;
-  private String rsPrefix;
-  private XOREncoder xorEncoder;
-  private XORDecoder xorDecoder;
-  private ReedSolomonEncoder rsEncoder;
-  private ReedSolomonDecoder rsDecoder;
-
   BlockReconstructor(Configuration conf) throws IOException {
     super(conf);
-
-    xorPrefix = RaidNode.xorDestinationPath(getConf()).toUri().getPath();
-    if (!xorPrefix.endsWith(Path.SEPARATOR)) {
-      xorPrefix += Path.SEPARATOR;
-    }
-    rsPrefix = RaidNode.rsDestinationPath(getConf()).toUri().getPath();
-    if (!rsPrefix.endsWith(Path.SEPARATOR)) {
-      rsPrefix += Path.SEPARATOR;
-    }
-    int stripeLength = RaidNode.getStripeLength(getConf());
-    xorEncoder = new XOREncoder(getConf(), stripeLength);
-    xorDecoder = new XORDecoder(getConf(), stripeLength);
-    int parityLength = RaidNode.rsParityLength(getConf());
-    rsEncoder = new ReedSolomonEncoder(getConf(), stripeLength, parityLength);
-    rsDecoder = new ReedSolomonDecoder(getConf(), stripeLength, parityLength);
-
   }
   
   /**
-   * checks whether file is xor parity file
+   * Is the path a parity file of a given Codec?
    */
-  boolean isXorParityFile(Path p) {
-    String pathStr = p.toUri().getPath();
-    return isXorParityFile(pathStr);
+  boolean isParityFile(Path p, Codec c) {
+    return isParityFile(p.toUri().getPath(), c);
   }
 
-  boolean isXorParityFile(String pathStr) {
+  boolean isParityFile(String pathStr, Codec c) {
     if (pathStr.contains(RaidNode.HAR_SUFFIX)) {
       return false;
     }
-    return pathStr.startsWith(xorPrefix);
+    return pathStr.startsWith(getParityPrefix(c));
   }
 
-  /**
-   * checks whether file is rs parity file
-   */
-  boolean isRsParityFile(Path p) {
-    String pathStr = p.toUri().getPath();
-    return isRsParityFile(pathStr);
-  }
-
-  boolean isRsParityFile(String pathStr) {
-    if (pathStr.contains(RaidNode.HAR_SUFFIX)) {
-      return false;
+  private String getParityPrefix(Codec c) {
+    String prefix = c.parityDirectory;
+    if (!prefix.endsWith(Path.SEPARATOR)) {
+      prefix += Path.SEPARATOR;
     }
-    return pathStr.startsWith(rsPrefix);
+    return prefix;
   }
 
   /**
@@ -125,36 +94,21 @@ abstract class BlockReconstructor extends Configured {
       return processParityHarPartFile(srcPath, progress);
     }
 
-    // The lost file is a XOR parity file
-    if (isXorParityFile(srcPath)) {
-      return processParityFile(srcPath, xorEncoder, progress);
-    }
-
-    // The lost file is a ReedSolomon parity file
-    if (isRsParityFile(srcPath)) {
-      return processParityFile(srcPath, rsEncoder, progress);
-    }
-
-    // The lost file is a source file. It might have a Reed-Solomon parity
-    // or XOR parity or both.
-    // Look for the Reed-Solomon parity file first. It is possible that the XOR
-    // parity file is missing blocks at this point.
-    ParityFilePair ppair = ParityFilePair.getParityFile(
-        ErasureCodeType.RS, srcPath, getConf());
-    Decoder decoder = null;
-    if (ppair != null) {
-      decoder = rsDecoder;
-    } else  {
-      ppair = ParityFilePair.getParityFile(
-          ErasureCodeType.XOR, srcPath, getConf());
-      if (ppair != null) {
-        decoder = xorDecoder;
+    // Reconstruct parity file
+    for (Codec codec : Codec.getCodecs()) {
+      if (isParityFile(srcPath, codec)) {
+        return processParityFile(srcPath, RaidNode.encoderForCodec(codec), progress);
       }
     }
 
-    // If we have a parity file, process the file and reconstruct it.
-    if (ppair != null) {
-      return processFile(srcPath, ppair, decoder, progress);
+    // Reconstruct source file
+    for (Codec codec : Codec.getCodecs()) {
+      ParityFilePair ppair = ParityFilePair.getParityFile(
+          codec, srcPath, getConf());
+      if (ppair != null) {
+        Decoder decoder = RaidNode.decoderForCodec(codec);
+        return processFile(srcPath, ppair, decoder, progress);
+      }
     }
 
     // there was nothing to do
@@ -170,16 +124,25 @@ abstract class BlockReconstructor extends Configured {
     // TODO: We should first fix the files that lose more blocks
     Comparator<String> comp = new Comparator<String>() {
       public int compare(String p1, String p2) {
-        if (isXorParityFile(p2) || isRsParityFile(p2)) {
-          // If p2 is a parity file, p1 is smaller.
-          return -1;
+        Codec c1 = null;
+        Codec c2 = null;
+        for (Codec codec : Codec.getCodecs()) {
+          if (isParityFile(p1, codec)) {
+            c1 = codec;
+          } else if (isParityFile(p2, codec)) {
+            c2 = codec;
+          }
         }
-        if (isXorParityFile(p1) || isRsParityFile(p1)) {
-          // If p1 is a parity file, p2 is smaller.
-          return 1;
+        if (c1 == null && c2 == null) {
+          return 0; // both are source files
         }
-        // If both are source files, they are equal.
-        return 0;
+        if (c1 == null && c2 != null) {
+          return -1; // only p1 is a source file
+        }
+        if (c2 == null && c1 != null) {
+          return 1; // only p2 is a source file
+        }
+        return c2.priority - c1.priority; // descending order
       }
     };
     Collections.sort(files, comp);
@@ -422,12 +385,13 @@ abstract class BlockReconstructor extends Configured {
           throw new IOException(msg);
         }
         Path parityFile = new Path(entry.fileName);
-        Encoder encoder;
-        if (isXorParityFile(parityFile)) {
-          encoder = xorEncoder;
-        } else if (isRsParityFile(parityFile)) {
-          encoder = rsEncoder;
-        } else {
+        Encoder encoder = null;
+        for (Codec codec : Codec.getCodecs()) {
+          if (isParityFile(parityFile, codec)) {
+            encoder = RaidNode.encoderForCodec(codec);
+          }
+        }
+        if (encoder == null) {
           String msg = "Could not figure out parity file correctly";
           LOG.warn(msg);
           throw new IOException(msg);
@@ -674,14 +638,13 @@ abstract class BlockReconstructor extends Configured {
    */
   Path sourcePathFromParityPath(Path parityPath) {
     String parityPathStr = parityPath.toUri().getPath();
-    if (parityPathStr.startsWith(xorPrefix)) {
-      // Remove the prefix to get the source file.
-      String src = parityPathStr.replaceFirst(xorPrefix, "/");
-      return new Path(src);
-    } else if (parityPathStr.startsWith(rsPrefix)) {
-      // Remove the prefix to get the source file.
-      String src = parityPathStr.replaceFirst(rsPrefix, "/");
-      return new Path(src);
+    for (Codec codec : Codec.getCodecs()) {
+      String prefix = getParityPrefix(codec);
+      if (parityPathStr.startsWith(prefix)) {
+        // Remove the prefix to get the source file.
+        String src = parityPathStr.replaceFirst(prefix, "/");
+        return new Path(src);
+      }
     }
     return null;
   }
