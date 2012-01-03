@@ -52,11 +52,7 @@ import org.apache.hadoop.hdfs.DistributedFileSystem;
 import org.apache.hadoop.raid.Codec;
 import org.apache.hadoop.raid.Decoder;
 import org.apache.hadoop.raid.RaidNode;
-import org.apache.hadoop.raid.ReedSolomonDecoder;
-import org.apache.hadoop.raid.XORDecoder;
-import org.apache.hadoop.util.Progressable;
 import org.apache.hadoop.util.ReflectionUtils;
-import org.apache.hadoop.util.StringUtils;
 
 /**
  * This is an implementation of the Hadoop  RAID Filesystem. This FileSystem 
@@ -498,8 +494,7 @@ public class DistributedRaidFileSystem extends FilterFileSystem {
 
             return;
           } catch (Exception e) {
-            LOG.info("Error in using alternate path " + path + ". " + StringUtils.stringifyException(e) +
-                     " Ignoring...");
+            LOG.info("Ignoring error in using alternate path " + path, e);
           }
         }
         LOG.warn("Could not reconstruct block " + stat.getPath() + ":" +

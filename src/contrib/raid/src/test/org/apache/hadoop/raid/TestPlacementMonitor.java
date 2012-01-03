@@ -87,7 +87,7 @@ public class TestPlacementMonitor {
     conf.set("dfs.replication.pending.timeout.sec", "2");
     conf.setLong("dfs.blockreport.intervalMsec", 100L);
     conf.setLong("dfs.block.size", 1L);
-    Utils.loadTestCodecs(3, 1, 2, "/raid", "/raidrs");
+    Utils.loadTestCodecs(conf, 3, 1, 2, "/raid", "/raidrs");
     conf.setBoolean(PlacementMonitor.SIMULATE_KEY, false);
     conf.setInt("io.bytes.per.checksum", 1);
   }

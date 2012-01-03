@@ -191,8 +191,6 @@ public class TestRaidShell extends TestCase {
     // do not use map-reduce cluster for Raiding
     conf.set("raid.classname", "org.apache.hadoop.raid.LocalRaidNode");
     conf.set("raid.server.address", "localhost:0");
-    conf.setInt("hdfs.raid.stripeLength", stripeLength);
-    conf.set("hdfs.raid.locations", "/raid");
 
     conf.setBoolean("dfs.permissions", false);
 
@@ -248,7 +246,7 @@ public class TestRaidShell extends TestCase {
     fileWriter.write(str);
     fileWriter.close();
 
-    Utils.loadTestCodecs();
+    Utils.loadTestCodecs(conf, stripeLength, 1, 3, "/raid", "/raidrs");
   }
 
   private void myTearDown() throws Exception {

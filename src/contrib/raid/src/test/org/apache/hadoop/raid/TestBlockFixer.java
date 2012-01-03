@@ -111,10 +111,9 @@ public class TestBlockFixer extends TestCase {
     dfsCluster.waitActive();
     FileSystem fs = dfsCluster.getFileSystem();
 
+    Utils.loadTestCodecs(conf);
     try {
       Configuration testConf = fs.getConf();
-      testConf.set("hdfs.raid.locations", "/raid");
-      testConf.set("hdfs.raidrs.locations", "/raidrs");
       BlockIntegrityMonitor blockFixer = new LocalBlockIntegrityMonitor(testConf);
 
       String p1 = "/user/foo/f1";
@@ -688,7 +687,7 @@ public class TestBlockFixer extends TestCase {
         LOG.info("Test testBlockFix waiting for files to be fixed.");
         Thread.sleep(10);
       }
-      assertEquals("files not fixed", 2, blockFixer.getNumFilesFixed());
+      assertTrue("files not fixed", blockFixer.getNumFilesFixed() >= 2);
 
       dfs = getDFS(conf, dfs);
       
@@ -838,9 +837,10 @@ public class TestBlockFixer extends TestCase {
     int numBlocks = 8;
     long blockSize = 16384;
     int stripeLength = 3;
-    Path destPath = new Path("/raidrs");
-    Codec codec = Codec.getCodec("rs");
+    Path destPath = new Path("/destraidrs");
     mySetup(stripeLength, -1); // never har
+    Codec codec = Codec.getCodec("rs");
+    LOG.info("Starting testMultiplePriorities");
     try {
       // Create test file and raid it.
       TestRaidDfs.createTestFilePartialLastBlock(
@@ -913,7 +913,7 @@ public class TestBlockFixer extends TestCase {
     conf.set("raid.classname", "org.apache.hadoop.raid.LocalRaidNode");
     conf.set("raid.server.address", "localhost:0");
 
-    Utils.loadTestCodecs(stripeLength, 1, 3, "/destraid", "/destraidrs");
+    Utils.loadTestCodecs(conf, stripeLength, 1, 3, "/destraid", "/destraidrs");
 
     conf.setBoolean("dfs.permissions", false);
 

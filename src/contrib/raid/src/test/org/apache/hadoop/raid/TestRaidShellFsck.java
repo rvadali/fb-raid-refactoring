@@ -103,9 +103,6 @@ public class TestRaidShellFsck {
    * creates a MiniDFS instance with a raided file in it
    */
   private void setUp(boolean doHar) throws IOException, ClassNotFoundException {
-
-    Utils.loadTestCodecs();
-
     final int timeBeforeHar;
     if (doHar) {
       timeBeforeHar = 0;
@@ -116,6 +113,8 @@ public class TestRaidShellFsck {
 
     new File(TEST_DIR).mkdirs(); // Make sure data directory exists
     conf = new Configuration();
+
+    Utils.loadTestCodecs(conf, 3, 1, 3, "/raid", "/raidrs");
 
     conf.set("raid.config.file", CONFIG_FILE);
     conf.setBoolean("raid.config.reload", true);
@@ -131,7 +130,6 @@ public class TestRaidShellFsck {
              "org.apache.hadoop.raid.LocalBlockIntegrityMonitor");
 
     conf.set("raid.server.address", "localhost:0");
-    conf.setInt("hdfs.raid.stripeLength", STRIPE_BLOCKS);
 
     conf.setInt("dfs.corruptfilesreturned.max", 500);
 
@@ -150,7 +148,7 @@ public class TestRaidShellFsck {
       "<configuration> " +
       "    <policy name = \"RaidTest1\"> " +
       "      <srcPath prefix=\"" + DIR_PATH + "\"/> " +
-      "      <codeId>xor</codeId> " +
+      "      <codecId>xor</codecId> " +
       "      <destPath> " + RAID_DIR + " </destPath> " +
       "      <property> " +
       "        <name>targetReplication</name> " +

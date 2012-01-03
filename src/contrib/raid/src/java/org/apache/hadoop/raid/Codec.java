@@ -134,30 +134,34 @@ public class Codec {
     }
   }
 
-  protected static void initializeCodecs(Configuration conf) throws JSONException {
-    String source = conf.get("raid.codecs.json");
-    if (source == null) {
-      codecs = Collections.emptyList();
-      idToCodec = Collections.emptyMap();
-      return;
-    }
-    JSONArray jsonArray = new JSONArray(source);
-    codecs = new ArrayList<Codec>();
-    idToCodec = new HashMap<String, Codec>();
-    for (int i = 0; i < jsonArray.length(); ++i) {
-      Codec codec = new Codec(jsonArray.getJSONObject(i));
-      idToCodec.put(codec.id, codec);
-      codecs.add(codec);
-    }
-    Collections.sort(codecs, new Comparator<Codec>() {
-      @Override
-      public int compare(Codec c1, Codec c2) {
-        // Higher priority on top
-        return c2.priority - c1.priority;
+  public static void initializeCodecs(Configuration conf) throws IOException {
+    try {
+      String source = conf.get("raid.codecs.json");
+      if (source == null) {
+        codecs = Collections.emptyList();
+        idToCodec = Collections.emptyMap();
+        return;
       }
-    });
-    codecs = Collections.unmodifiableList(codecs);
-    idToCodec = Collections.unmodifiableMap(idToCodec);
+      JSONArray jsonArray = new JSONArray(source);
+      codecs = new ArrayList<Codec>();
+      idToCodec = new HashMap<String, Codec>();
+      for (int i = 0; i < jsonArray.length(); ++i) {
+        Codec codec = new Codec(jsonArray.getJSONObject(i));
+        idToCodec.put(codec.id, codec);
+        codecs.add(codec);
+      }
+      Collections.sort(codecs, new Comparator<Codec>() {
+        @Override
+        public int compare(Codec c1, Codec c2) {
+          // Higher priority on top
+          return c2.priority - c1.priority;
+        }
+      });
+      codecs = Collections.unmodifiableList(codecs);
+      idToCodec = Collections.unmodifiableMap(idToCodec);
+    } catch (JSONException e) {
+      throw new IOException(e);
+    }
   }
 
   private Codec(JSONObject json) throws JSONException {
@@ -203,7 +207,7 @@ public class Codec {
     return result;
   }
 
-  public ErasureCode createErasureCode(Configuration conf) throws IOException {
+  public ErasureCode createErasureCode(Configuration conf) {
     // Create the scheduler
     Class<? extends ErasureCode> erasureCode
       = conf.getClass(erasureCodeClass, ReedSolomonCode.class, ErasureCode.class);
@@ -214,54 +218,10 @@ public class Codec {
 
   @Override
   public String toString() {
-    return json.toString();
+    if (json == null) {
+      return "Test codec " + id;
+    } else {
+      return json.toString();
+    }
   }
-
-  /**
-   * Used by unit test only
-   */
-  static void addCodec(Codec codec) {
-    List<Codec> newCodecs = new ArrayList<Codec>();
-    newCodecs.addAll(codecs);
-    newCodecs.add(codec);
-    codecs = Collections.unmodifiableList(newCodecs);
-
-    Map<String, Codec> newIdToCodec = new HashMap<String, Codec>();
-    newIdToCodec.putAll(idToCodec);
-    newIdToCodec.put(codec.id, codec);
-    idToCodec = Collections.unmodifiableMap(newIdToCodec);
-  }
-
-  /**
-   * Used by unit test only
-   */
-  static void clearCodecs() {
-    codecs = Collections.emptyList();
-    idToCodec = Collections.emptyMap();
-  }
-
-  /**
-   * Used by unit test only
-   */
-  Codec(String id,
-                int parityLength,
-                int stripeLength,
-                String erasureCodeClass,
-                String parityDirectory,
-                int priority,
-                String description,
-                String tmpParityDirectory,
-                String tmpHarDirectory) {
-    this.json = null;
-    this.id = id;
-    this.parityLength = parityLength;
-    this.stripeLength = stripeLength;
-    this.erasureCodeClass = erasureCodeClass;
-    this.parityDirectory = parityDirectory;
-    this.priority = priority;
-    this.description = description;
-    this.tmpParityDirectory = tmpParityDirectory;
-    this.tmpHarDirectory = tmpHarDirectory;
-  }
-
 }

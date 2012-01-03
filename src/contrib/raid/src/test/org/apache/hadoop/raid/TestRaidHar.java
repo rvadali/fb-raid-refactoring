@@ -101,7 +101,7 @@ public class TestRaidHar extends TestCase {
     FileSystem.setDefaultUri(conf, namenode);
     conf.set("mapred.job.tracker", jobTrackerName);
 
-    Utils.loadTestCodecs();
+    Utils.loadTestCodecs(conf);
   }
     
   /**

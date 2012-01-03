@@ -249,9 +249,9 @@ class ConfigManager {
             String text = ((Text)property.getFirstChild()).getData().trim();
             LOG.info(policyName + ".fileList = " + text);
             curr.setFileListPath(new Path(text));
-          } else if ("codeId".equalsIgnoreCase(propertyName)) {
+          } else if ("codecId".equalsIgnoreCase(propertyName)) {
             String text = ((Text)property.getFirstChild()).getData().trim();
-            LOG.info(policyName + ".codeId = " + text);
+            LOG.info(policyName + ".codecId = " + text);
             curr.setCodecId(text);
           } else if ("shouldRaid".equalsIgnoreCase(propertyName)) {
             String text = ((Text)property.getFirstChild()).getData().trim();

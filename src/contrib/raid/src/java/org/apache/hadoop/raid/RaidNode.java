@@ -866,7 +866,7 @@ public abstract class RaidNode implements RaidProtocol {
       // ignore errors because the raid file might not exist yet.
     }
 
-    Encoder encoder = encoderForCodec(codec);
+    Encoder encoder = new Encoder(conf, codec);
     encoder.encodeFile(inFs, inpath, outFs, outpath, (short)metaRepl, reporter);
 
     // set the modification time of the RAID file. This is done so that the modTime of the
@@ -915,7 +915,7 @@ public abstract class RaidNode implements RaidProtocol {
     FileStatus stat = srcFs.getFileStatus(srcPath);
     long limit = Math.min(stat.getBlockSize(), stat.getLen() - corruptOffset);
     java.io.OutputStream out = recoveryFs.create(recoveredBlock);
-    Decoder decoder = decoderForCodec(codec);
+    Decoder decoder = new Decoder(conf, codec);
     try {
       decoder.fixErasedBlock(srcFs, srcPath,
           ppair.getFileSystem(), ppair.getPath(),
@@ -1124,16 +1124,6 @@ public abstract class RaidNode implements RaidProtocol {
       }
       LOG.info("Leaving Har thread.");
     }
-  }
-
-  static Encoder encoderForCodec(Codec codec) {
-    // TODO: implement this
-    return null;
-  }
-
-  static Decoder decoderForCodec(Codec codec) {
-    // TODO: implemnet this
-    return null;
   }
 
   static boolean isParityHarPartFile(Path p) {

@@ -73,11 +73,8 @@ public class TestRaidDfs extends TestCase {
     conf.setInt("raid.encoder.bufsize", 128);
     conf.setInt("raid.decoder.bufsize", 128);
 
-    if ("xor".equals(erasureCode)) {
-      Utils.loadTestCodecs(stripeLength, 1, rsParityLength, "/destraid", "");
-    } else {
-      Utils.loadTestCodecs(stripeLength, 1, rsParityLength, "", "/destraid");
-    }
+    Utils.loadTestCodecs(conf, stripeLength, 1, rsParityLength, "/destraid", "/destraidrs");
+    codec = Codec.getCodec(erasureCode);
 
     // scan all policies once every 5 second
     conf.setLong("raid.policy.rescan.interval", 5000);
@@ -204,19 +201,18 @@ public class TestRaidDfs extends TestCase {
   public void testRaidDfsRs() throws Exception {
     LOG.info("Test testRaidDfs started.");
 
-    codec = Codec.getCodec("rs");
     long blockSize = 8192L;
     int numBlocks = 8;
     stripeLength = 3;
     mySetup("rs", 3);
 
-    Path destPath = new Path("/destraid/user/dhruba/raidtest");
+    Path destPath = new Path("/destraidrs/user/dhruba/raidtest");
     int[][] corrupt = {{1, 2, 3}, {1, 4, 7}, {3, 6, 7}};
     try {
       for (int i = 0; i < corrupt.length; i++) {
         Path file = new Path("/user/dhruba/raidtest/file" + i);
         corruptBlockAndValidate(
-            file, new Path("/destraid"), corrupt[i], blockSize, numBlocks,
+            file, new Path("/destraidrs"), corrupt[i], blockSize, numBlocks,
             dfs);
       }
     } catch (Exception e) {
@@ -233,7 +229,6 @@ public class TestRaidDfs extends TestCase {
    * Test DistributedRaidFileSystem.readFully()
    */
   public void testReadFully() throws Exception {
-    codec = Codec.getCodec("xor");
     stripeLength = 3;
     mySetup("xor", 1);
 
@@ -273,7 +268,6 @@ public class TestRaidDfs extends TestCase {
   }
 
   public void testSeek() throws Exception {
-    codec = Codec.getCodec("xor");
     stripeLength = 3;
     mySetup("xor", 1);
 
@@ -327,7 +321,6 @@ public class TestRaidDfs extends TestCase {
   public void testRaidDfsXor() throws Exception {
     LOG.info("Test testRaidDfs started.");
 
-    codec = Codec.getCodec("xor");
     long blockSize = 8192L;
     int numBlocks = 8;
     stripeLength = 3;
@@ -396,7 +389,6 @@ public class TestRaidDfs extends TestCase {
   }
 
   public void testTooManyErrorsDecodeXOR() throws Exception {
-    codec = Codec.getCodec("xor");
     long blockSize = 8192L;
     int numBlocks = 8;
     stripeLength = 3;
@@ -421,19 +413,18 @@ public class TestRaidDfs extends TestCase {
   }
 
   public void testTooManyErrorsDecodeRS() throws Exception {
-    codec = Codec.getCodec("rs");
     long blockSize = 8192L;
     int numBlocks = 8;
     stripeLength = 3;
     mySetup("rs", 1);
     try {
-      Path destPath = new Path("/destraid/user/dhruba/raidtest");
+      Path destPath = new Path("/destraidrs/user/dhruba/raidtest");
       int[] corrupt = {0,1}; // Two blocks in the same stripe is too much.
       Path file = new Path("/user/dhruba/raidtest/file2");
       boolean expectedExceptionThrown = false;
       try {
         corruptBlockAndValidate(
-            file, new Path("/destraid"), corrupt, blockSize, numBlocks, dfs);
+            file, new Path("/destraidrs"), corrupt, blockSize, numBlocks, dfs);
       } catch (IOException e) {
         LOG.info("Expected exception caught" + e);
         expectedExceptionThrown = true;
@@ -445,7 +436,6 @@ public class TestRaidDfs extends TestCase {
   }
 
   public void testTooManyErrorsEncode() throws Exception {
-    codec = Codec.getCodec("xor");
     long blockSize = 8192L;
     int numBlocks = 8;
     stripeLength = 3;
@@ -479,14 +469,13 @@ public class TestRaidDfs extends TestCase {
   }
 
   public void testTooManyErrorsEncodeRS() throws Exception {
-    codec = Codec.getCodec("rs");
     long blockSize = 8192L;
     int numBlocks = 8;
     stripeLength = 3;
     mySetup("rs", 1);
     // Encoding with RS should fail when even one block is corrupt.
     try {
-      Path destPath = new Path("/destraid/user/dhruba/raidtest");
+      Path destPath = new Path("/destraidrs/user/dhruba/raidtest");
         Path file = new Path("/user/dhruba/raidtest/file2");
         int repl = 1;
         createTestFilePartialLastBlock(fileSys, file, repl, numBlocks, blockSize);

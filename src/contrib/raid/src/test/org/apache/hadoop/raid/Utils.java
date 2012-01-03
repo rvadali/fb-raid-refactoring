@@ -17,8 +17,11 @@
  */
 package org.apache.hadoop.raid;
 
+import java.io.IOException;
+
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.conf.Configuration;
 
 /**
  * A place for some static methods used by the Raid unit test
@@ -30,40 +33,43 @@ public class Utils {
   /**
    * Load typical codecs for unit test use
    */
-  public static void loadTestCodecs() {
-    Utils.loadTestCodecs(5, 1, 3, "/raid", "/raidrs");
+  public static void loadTestCodecs(Configuration conf) throws IOException {
+    Utils.loadTestCodecs(conf, 5, 1, 3, "/raid", "/raidrs");
   }
 
   /**
    * Load RS and XOR codecs with given parameters
    */
-  public static void loadTestCodecs(int stripeLength, int xorParityLength, int rsParityLength,
-      String xorParityDirectory, String rsParityDirectory) {
-    Codec.clearCodecs();
-    {
-      Codec codec = new Codec("xor",
-                              xorParityLength,
-                              stripeLength,
-                              "org.apache.hadoop.raid.XorCode",
-                              xorParityDirectory,
-                              100,
-                              "",
-                              "/tmp/" + xorParityDirectory,
-                              "/tmp" + xorParityDirectory + "_har");
-      Codec.addCodec(codec);
-    }
-    {
-      Codec codec = new Codec("rs",
-                              rsParityLength,
-                              stripeLength,
-                              "org.apache.hadoop.raid.ReedSolomonCode",
-                              rsParityDirectory,
-                              200,
-                              "",
-                              "/tmp" + rsParityDirectory,
-                              "/tmp" + rsParityDirectory + "_har");
-      Codec.addCodec(codec);
-    }
+  public static void loadTestCodecs(Configuration conf,
+      int stripeLength, int xorParityLength, int rsParityLength,
+      String xorParityDirectory, String rsParityDirectory) throws IOException {
+    String codecsJSON = "[ " +
+    " { " +
+      "\"id\":\"xor\"," +
+      "\"parity_dir\":\"" + xorParityDirectory + "\"," +
+      "\"tmp_parity_dir\":\"" + "/tmp/" + xorParityDirectory + "\"," +
+      "\"tmp_har_dir\":\"" + "/tmp/" + xorParityDirectory + "_har" + "\"," +
+      "\"stripe_length\":" + stripeLength + "," +
+      "\"parity_length\":" + xorParityLength + "," +
+      "\"priority\":" + 100 + "," +
+      "\"erasure_code\":\"org.apache.hadoop.raid.XorCode\"," +
+      "\"description\":\"XOR Code\"," +
+    " }, " +
+    " { " +
+      "\"id\":\"rs\"," +
+      "\"parity_dir\":\"" + rsParityDirectory + "\"," +
+      "\"tmp_parity_dir\":\"" + "/tmp/" + rsParityDirectory + "\"," +
+      "\"tmp_har_dir\":\"" + "/tmp/" + rsParityDirectory + "_har" + "\"," +
+      "\"stripe_length\":" + stripeLength + "," +
+      "\"parity_length\":" + rsParityLength + "," +
+      "\"priority\":" + 300 + "," +
+      "\"erasure_code\":\"org.apache.hadoop.raid.ReedSolomonCode\"," +
+      "\"description\":\"Reed Solomon Code\"," +
+    " }, " +
+    " ] ";
+    LOG.info("raid.codecs.json=" + codecsJSON);
+    conf.set("raid.codecs.json", codecsJSON);
+    Codec.initializeCodecs(conf);
     LOG.info("Test codec loaded");
     for (Codec c : Codec.getCodecs()) {
       LOG.info("Loaded raid code:" + c.id);

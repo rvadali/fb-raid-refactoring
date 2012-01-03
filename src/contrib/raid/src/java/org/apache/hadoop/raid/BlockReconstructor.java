@@ -58,7 +58,7 @@ abstract class BlockReconstructor extends Configured {
   BlockReconstructor(Configuration conf) throws IOException {
     super(conf);
   }
-  
+
   /**
    * Is the path a parity file of a given Codec?
    */
@@ -97,7 +97,7 @@ abstract class BlockReconstructor extends Configured {
     // Reconstruct parity file
     for (Codec codec : Codec.getCodecs()) {
       if (isParityFile(srcPath, codec)) {
-        return processParityFile(srcPath, RaidNode.encoderForCodec(codec), progress);
+        return processParityFile(srcPath, new Encoder(getConf(), codec), progress);
       }
     }
 
@@ -106,7 +106,7 @@ abstract class BlockReconstructor extends Configured {
       ParityFilePair ppair = ParityFilePair.getParityFile(
           codec, srcPath, getConf());
       if (ppair != null) {
-        Decoder decoder = RaidNode.decoderForCodec(codec);
+        Decoder decoder = new Decoder(getConf(), codec);
         return processFile(srcPath, ppair, decoder, progress);
       }
     }
@@ -388,11 +388,11 @@ abstract class BlockReconstructor extends Configured {
         Encoder encoder = null;
         for (Codec codec : Codec.getCodecs()) {
           if (isParityFile(parityFile, codec)) {
-            encoder = RaidNode.encoderForCodec(codec);
+            encoder = new Encoder(getConf(), codec);
           }
         }
         if (encoder == null) {
-          String msg = "Could not figure out parity file correctly";
+          String msg = "Could not figure out codec correctly for " + parityFile;
           LOG.warn(msg);
           throw new IOException(msg);
         }

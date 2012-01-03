@@ -81,7 +81,7 @@ public class TestMissingParity extends TestCase {
   FileSystem fileSys = null;
   String jobTrackerName = null;
   Path root = null;
-  Set<Path> allExpectedMissingFiles = null;
+  Set<String> allExpectedMissingFiles = null;
 
   private void createClusters(boolean local) throws Exception {
     if (System.getProperty("hadoop.log.dir") == null) {
@@ -95,7 +95,7 @@ public class TestMissingParity extends TestCase {
     conf.setBoolean("raid.config.reload", true);
     conf.setLong("raid.config.reload.interval", RELOAD_INTERVAL);
 
-    Utils.loadTestCodecs();
+    Utils.loadTestCodecs(conf);
 
     // scan all policies once every 100 second
     conf.setLong("raid.policy.rescan.interval", 100 * 1000L);
@@ -132,10 +132,10 @@ public class TestMissingParity extends TestCase {
     Path fPath3 = new Path(root + file3);
     Path fPath4 = new Path(root + file4);
     Path rPath3 = new Path(raidRoot + file3);
-    allExpectedMissingFiles = new HashSet<Path>();
-    allExpectedMissingFiles.add(fPath2);
-    allExpectedMissingFiles.add(fPath3);
-    allExpectedMissingFiles.add(fPath4);
+    allExpectedMissingFiles = new HashSet<String>();
+    allExpectedMissingFiles.add(fPath2.toUri().getPath());
+    allExpectedMissingFiles.add(fPath3.toUri().getPath());
+    allExpectedMissingFiles.add(fPath4.toUri().getPath());
     fileSys.create(fPath1, (short)3);
     fileSys.create(fPath2, (short)2);
     fileSys.create(fPath3, (short)2);
@@ -159,7 +159,7 @@ public class TestMissingParity extends TestCase {
       System.out.println("Test unraided files with < 3 replication");
       createClusters(true);
       MissingParityFiles mf1 = new MissingParityFiles(conf);
-      Set<Path> missingFiles = mf1.findMissingParityFiles(root);
+      Set<String> missingFiles = mf1.findMissingParityFiles(root);
       System.out.println("Missing files count = " + missingFiles.size());
       assertEquals(allExpectedMissingFiles, missingFiles);
     } catch (Exception e) {

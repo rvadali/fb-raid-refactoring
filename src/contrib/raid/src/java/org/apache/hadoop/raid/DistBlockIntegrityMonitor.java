@@ -1055,6 +1055,8 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
       super.setup(context);
       
       Configuration conf = context.getConfiguration();
+
+      Codec.initializeCodecs(conf);
       
       Class<? extends BlockReconstructor> reconstructorClass = 
         context.getConfiguration().getClass(RECONSTRUCTOR_CLASS_TAG, 

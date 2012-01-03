@@ -372,19 +372,24 @@ public class PlacementMonitor {
    */
   public void clearAndReport() {
     synchronized (metrics) {
-      metrics.codecToMisplacedBlocks.clear();
       for (Codec codec : Codec.getCodecs()) {
         String id = codec.id;
         int extra = 0;
+        Map<Integer, MetricsLongValue> codecStatsMap =
+          metrics.codecToMisplacedBlocks.get(id);
+        // Reset the values.
+        for (Entry<Integer, MetricsLongValue> e: codecStatsMap.entrySet()) {
+          e.getValue().set(0);
+        }
         for (Entry<Integer, Long> e : blockHistograms.get(id).entrySet()) {
-          if (e.getValue() < RaidNodeMetrics.MAX_MONITORED_MISPLACED_BLOCKS - 1) {
-            MetricsLongValue v = metrics.codecToMisplacedBlocks.get(id).get(e.getKey());
+          if (e.getKey() < RaidNodeMetrics.MAX_MONITORED_MISPLACED_BLOCKS - 1) {
+            MetricsLongValue v = codecStatsMap.get(e.getKey());
             v.set(e.getValue());
           } else {
-            extra += 1;
+            extra += e.getValue();
           }
         }
-        MetricsLongValue v = metrics.codecToMisplacedBlocks.get(id).get(
+        MetricsLongValue v = codecStatsMap.get(
             RaidNodeMetrics.MAX_MONITORED_MISPLACED_BLOCKS - 1);
         v.set(extra);
       }

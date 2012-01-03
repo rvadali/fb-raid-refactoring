@@ -72,7 +72,7 @@ public class TestBlockPlacementPolicyRaid {
     conf.setLong("dfs.block.size", 1L);
     conf.set("dfs.block.replicator.classname",
              "org.apache.hadoop.hdfs.server.namenode.BlockPlacementPolicyRaid");
-    Utils.loadTestCodecs(2, 1, 3, "/raid", "/raidrs");
+    Utils.loadTestCodecs(conf, 2, 1, 3, "/raid", "/raidrs");
     conf.setInt("io.bytes.per.checksum", 1);
     // start the cluster with one datanode
     cluster = new MiniDFSCluster(conf, 1, true, rack1, host1);

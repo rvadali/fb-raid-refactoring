@@ -199,6 +199,8 @@ public class DistRaid {
         throws IOException {
       this.reporter = reporter;
       try {
+        Codec.initializeCodecs(jobconf);
+
         LOG.info("Raiding file=" + key.toString() + " policy=" + policy);
         Path p = new Path(key.toString());
         FileStatus fs = p.getFileSystem(jobconf).getFileStatus(p);

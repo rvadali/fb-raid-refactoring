@@ -64,9 +64,9 @@ public class MissingParityFiles {
     }
   }
   
-  public Set<Path> findMissingParityFiles(Path root) throws IOException {
+  public Set<String> findMissingParityFiles(Path root) throws IOException {
     List<Path> allPaths = Arrays.asList(root);
-    Set<Path> allMissingParityFiles = new HashSet<Path>();
+    Set<String> allMissingParityFiles = new HashSet<String>();
     boolean allowUseStandby = true;
     DirectoryTraversal traversal =
         DirectoryTraversal.fileRetriever(allPaths, fs,
@@ -90,7 +90,7 @@ public class MissingParityFiles {
         }
         if (!found) {
           System.out.println("File with replication < 3 and no parity file: " + filePath);
-          allMissingParityFiles.add(filePath);
+          allMissingParityFiles.add(filePath.toUri().getPath());
         }
       }
     }

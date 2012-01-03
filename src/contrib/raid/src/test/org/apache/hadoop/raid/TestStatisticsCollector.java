@@ -87,7 +87,7 @@ public class TestStatisticsCollector extends TestCase {
       dfs = new MiniDFSCluster(conf, 3, true, null);
       dfs.waitActive();
       FileSystem fs = dfs.getFileSystem();
-      Utils.loadTestCodecs();
+      Utils.loadTestCodecs(conf);
       verifySourceCollect("rs", fs, false);
       verifySourceCollect("xor", fs, false);
       verifyParityCollect("rs", fs);

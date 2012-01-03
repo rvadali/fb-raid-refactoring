@@ -323,7 +323,7 @@ public class RaidShell extends Configured implements Tool {
     MissingParityFiles mParFiles = new MissingParityFiles(conf);
     Path root = new Path(args[1]);
     try {
-      Set<Path> allMissingParityFiles = mParFiles.findMissingParityFiles(root);
+      Set<String> allMissingParityFiles = mParFiles.findMissingParityFiles(root);
     } catch (IOException ex) {
       System.err.println("findMissingParityFiles: " + ex);
     }

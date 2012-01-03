@@ -91,7 +91,7 @@ public class TestRaidPurge extends TestCase {
     // scan all policies once every 5 second
     conf.setLong("raid.policy.rescan.interval", 5000);
 
-    Utils.loadTestCodecs();
+    Utils.loadTestCodecs(conf);
 
     // the RaidNode does the raiding inline (instead of submitting to map/reduce)
     if (local) {
@@ -175,7 +175,7 @@ public class TestRaidPurge extends TestCase {
     fileWriter.write(str);
     fileWriter.close();
 
-    Utils.loadTestCodecs();
+    Utils.loadTestCodecs(conf);
   }
 
   /**
@@ -445,13 +445,12 @@ public class TestRaidPurge extends TestCase {
       Path xorParity =
         new Path("/raid", "user/test/raidtest/file1");
       Path rsParity =
-        new Path("/raid", "user/test/raidtest/file1");
+        new Path("/raidrs", "user/test/raidtest/file1");
       assertTrue(fileSys.exists(xorParity));
       assertTrue(fileSys.exists(rsParity));
 
       // Check purge of a single parity file.
-      PurgeMonitor purgeMonitor =
-        new PurgeMonitor(conf, new PlacementMonitor(conf));
+      PurgeMonitor purgeMonitor = new PurgeMonitor(conf, null);
       purgeMonitor.purgeCode(Codec.getCodec("rs"));
       // Calling purge under the RS path has no effect.
       assertTrue(fileSys.exists(xorParity));

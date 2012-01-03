@@ -110,7 +110,7 @@ public class TestBlockCopier extends TestCase {
     conf.set("raid.classname", "org.apache.hadoop.raid.LocalRaidNode");
     conf.set("raid.server.address", "localhost:0");
 
-    Utils.loadTestCodecs(STRIPE_LENGTH, 1, 3, "/raid", "/raidrs");
+    Utils.loadTestCodecs(conf, STRIPE_LENGTH, 1, 3, "/raid", "/raidrs");
 
     conf.setBoolean("dfs.permissions", false);
     

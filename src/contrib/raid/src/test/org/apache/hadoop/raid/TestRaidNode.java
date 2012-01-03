@@ -79,6 +79,8 @@ public class TestRaidNode extends TestCase {
     conf.setBoolean("raid.config.reload", true);
     conf.setLong("raid.config.reload.interval", RELOAD_INTERVAL);
 
+    Utils.loadTestCodecs(conf);
+
     // scan all policies once every 100 second
     conf.setLong("raid.policy.rescan.interval", 100 * 1000L);
 
@@ -137,7 +139,7 @@ public class TestRaidNode extends TestCase {
     }
 
     public void addPolicy(String name, short srcReplication,
-                          long targetReplication, long metaReplication, long stripeLength) {
+                          long targetReplication, long metaReplication) {
       String str =
           "<policy name = \"" + name + "\"> " +
              "<srcPath/> " +
@@ -161,12 +163,6 @@ public class TestRaidNode extends TestCase {
                "</description> " +
              "</property> " +
              "<property> " +
-               "<name>stripeLength</name> " +
-               "<value>" + stripeLength + "</value> " +
-               "<description> the max number of blocks in a file to RAID together " +
-               "</description> " +
-             "</property> " +
-             "<property> " +
                "<name>modTimePeriod</name> " +
                "<value>2000</value> " +
                "<description> time (milliseconds) after a file is modified to make it " +
@@ -178,7 +174,7 @@ public class TestRaidNode extends TestCase {
     }
 
     public void addPolicy(String name, String path, short srcReplication,
-                          long targetReplication, long metaReplication, long stripeLength) {
+                          long targetReplication, long metaReplication) {
       String str =
           "<policy name = \"" + name + "\"> " +
             "<srcPath prefix=\"" + path + "\"/> " +
@@ -199,12 +195,6 @@ public class TestRaidNode extends TestCase {
                "<name>metaReplication</name> " +
                "<value>" + metaReplication + "</value> " +
                "<description> replication factor of parity file" +
-               "</description> " + 
-             "</property> " +
-             "<property> " +
-               "<name>stripeLength</name> " +
-               "<value>" + stripeLength + "</value> " +
-               "<description> the max number of blocks in a file to RAID together " +
                "</description> " + 
              "</property> " +
              "<property> " +
@@ -245,16 +235,17 @@ public class TestRaidNode extends TestCase {
     LOG.info("Test testPathFilter started.");
 
     long blockSizes    []  = {1024L};
-    long stripeLengths []  = {1, 2, 5, 6, 10, 11, 12};
-    long targetReplication = 1;
-    long metaReplication   = 1;
+    int stripeLengths []  = {5, 6, 10, 11, 12};
+    int targetReplication = 1;
+    int metaReplication   = 1;
     int  numBlock          = 11;
     int  iter = 0;
 
     createClusters(true);
     try {
       for (long blockSize : blockSizes) {
-        for (long stripeLength : stripeLengths) {
+        for (int stripeLength : stripeLengths) {
+           Utils.loadTestCodecs(conf, stripeLength, 1, 3, "/raid", "/raidrs");
            doTestPathFilter(iter, targetReplication, metaReplication,
                                               stripeLength, blockSize, numBlock);
            iter++;
@@ -276,7 +267,7 @@ public class TestRaidNode extends TestCase {
     LOG.info("doTestPathFilter started---------------------------:" +  " iter " + iter +
              " blockSize=" + blockSize + " stripeLength=" + stripeLength);
     ConfigBuilder cb = new ConfigBuilder();
-    cb.addPolicy("policy1", "/user/dhruba/raidtest", (short)1, targetReplication, metaReplication, stripeLength);
+    cb.addPolicy("policy1", "/user/dhruba/raidtest", (short)1, targetReplication, metaReplication);
     cb.persist();
 
     RaidShell shell = null;
@@ -376,7 +367,7 @@ public class TestRaidNode extends TestCase {
     long blockSize = 1024;
     int numBlock = 3;
     ConfigBuilder cb = new ConfigBuilder();
-    cb.addPolicy("policy1", "/user/dhruba/policytest", (short)1, targetReplication, metaReplication, stripeLength);
+    cb.addPolicy("policy1", "/user/dhruba/policytest", (short)1, targetReplication, metaReplication);
     cb.persist();
     Path dir = new Path("/user/dhruba/policytest/");
     Path file1 = new Path(dir + "/file1");
@@ -491,8 +482,8 @@ public class TestRaidNode extends TestCase {
 
     createClusters(false);
     ConfigBuilder cb = new ConfigBuilder();
-    cb.addPolicy("policy1", "/user/dhruba/raidtest", (short)1, targetReplication, metaReplication, stripeLength);
-    cb.addPolicy("abstractPolicy", (short)1, targetReplication, metaReplication, stripeLength);
+    cb.addPolicy("policy1", "/user/dhruba/raidtest", (short)1, targetReplication, metaReplication);
+    cb.addPolicy("abstractPolicy", (short)1, targetReplication, metaReplication);
     cb.addPolicy("policy2", "/user/dhruba/raidtest2", "abstractPolicy");
     cb.persist();
 
@@ -521,8 +512,6 @@ public class TestRaidNode extends TestCase {
                        Integer.parseInt(p.getProperty("targetReplication")));
           assertEquals(metaReplication,
                        Integer.parseInt(p.getProperty("metaReplication")));
-          assertEquals(stripeLength,
-                       Integer.parseInt(p.getProperty("stripeLength")));
       }
 
       long start = System.currentTimeMillis();
@@ -635,7 +624,7 @@ public class TestRaidNode extends TestCase {
 
     createClusters(false);
     ConfigBuilder cb = new ConfigBuilder();
-    cb.addPolicy("policy1", "/user/dhruba/raidtest", (short)1, targetReplication, metaReplication, stripeLength);
+    cb.addPolicy("policy1", "/user/dhruba/raidtest", (short)1, targetReplication, metaReplication);
     cb.persist();
 
     RaidNode cnode = null;
@@ -712,7 +701,7 @@ public class TestRaidNode extends TestCase {
 
     createClusters(false);
     ConfigBuilder cb = new ConfigBuilder();
-    cb.addPolicy("abstractPolicy", (short)1, targetReplication, metaReplication, stripeLength);
+    cb.addPolicy("abstractPolicy", (short)1, targetReplication, metaReplication);
     cb.addFileListPolicy("policy2", "/user/rvadali/raidfilelist.txt", "abstractPolicy");
     cb.persist();
 

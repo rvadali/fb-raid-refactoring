@@ -20,7 +20,7 @@ package org.apache.hadoop.raid;
 
 import java.io.IOException;
 
-public interface ErasureCode {
+public abstract class ErasureCode {
   /**
    * Encodes the given message.
    * @param message The data of the message. The data is present in the least
@@ -32,7 +32,7 @@ public interface ErasureCode {
    *                symbolSize(). The number of elements in the code is
    *                paritySize().
    */
-  public void encode(int[] message, int[] parity);
+  public abstract void encode(int[] message, int[] parity);
 
   /**
    * Generates missing portions of data.
@@ -43,25 +43,64 @@ public interface ErasureCode {
    * @param erasedLocations The indexes in data which are not available.
    * @param erasedValues    (out)The decoded values corresponding to erasedLocations.
    */
-  public void decode(int[] data, int[] erasedLocations, int[] erasedValues);
+  public abstract void decode(int[] data, int[] erasedLocations, int[] erasedValues);
 
   /**
    * The number of elements in the message.
    */
-  public int stripeSize();
+  public abstract int stripeSize();
 
   /**
    * The number of elements in the code.
    */
-  public int paritySize();
-
-  /**
-   * Number of bits for each symbol.
-   */
-  public int symbolSize();
+  public abstract int paritySize();
 
   /**
    * Initialize code parameters
    */
-  public void init(Codec codec) throws IOException;
+  public abstract void init(Codec codec);
+
+  public abstract int symbolSize();
+
+  public void encodeBulk(byte[][] inputs, byte[][] outputs) {
+    final int stripeSize = stripeSize();
+    final int paritySize = paritySize();
+    assert(stripeSize == inputs.length);
+    assert(paritySize == outputs.length);
+    int[] data = new int[stripeSize];
+    int[] code = new int[paritySize];
+
+    for (int j = 0; j < outputs[0].length; j++) {
+      for (int i = 0; i < paritySize; i++) {
+        code[i] = 0;
+      }
+      for (int i = 0; i < stripeSize; i++) {
+        data[i] = inputs[i][j] & 0x000000FF;
+      }
+      encode(data, code);
+      for (int i = 0; i < paritySize; i++) {
+        outputs[i][j] = (byte)code[i];
+      }
+    }
+  }
+
+  public void decodeBulk(
+    byte[][] readBufs, byte[][] writeBufs, int[] erasedLocations) {
+    int[] tmpInput = new int[readBufs.length];
+    int[] tmpOutput = new int[erasedLocations.length];
+
+    int numBytes = readBufs[0].length;
+    for (int idx = 0; idx < numBytes; idx++) {
+      for (int i = 0; i < tmpOutput.length; i++) {
+        tmpOutput[i] = 0;
+      }
+      for (int i = 0; i < tmpInput.length; i++) {
+        tmpInput[i] = readBufs[i][idx] & 0x000000FF;
+      }
+      decode(tmpInput, erasedLocations, tmpOutput);
+      for (int i = 0; i < tmpOutput.length; i++) {
+        writeBufs[i][idx] = (byte)tmpOutput[i];
+      }
+    }
+  }
 }
