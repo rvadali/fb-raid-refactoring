@@ -19,6 +19,9 @@
 package org.apache.hadoop.raid;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 public abstract class ErasureCode {
   /**
@@ -44,6 +47,42 @@ public abstract class ErasureCode {
    * @param erasedValues    (out)The decoded values corresponding to erasedLocations.
    */
   public abstract void decode(int[] data, int[] erasedLocations, int[] erasedValues);
+
+  /**
+   * Figure out which locations need to be read to decode erased locations.
+   * The locations are specified as integers in the range
+   * [ 0, stripeSize() + paritySize() ). Values in the range [ 0, paritySize() )
+   * represent parity data. Values in the range
+   * [ paritySize(), paritySize() + stripeSize() ) represent message data.
+   *
+   * @param erasedLocations The erased locations.
+   * @return The locations to read.
+   */
+  public List<Integer> locationsToReadForDecode(List<Integer> erasedLocations)
+      throws TooManyErasedLocations {
+    List<Integer> locationsToRead = new ArrayList<Integer>(stripeSize());
+    int limit = stripeSize() + paritySize();
+    // Loop through all possible locations in the stripe.
+    for (int loc = 0; loc < limit; loc++) {
+      // Is the location good.
+      if (erasedLocations.indexOf(loc) == -1) {
+        locationsToRead.add(loc);
+        if (stripeSize() == locationsToRead.size()) {
+          break;
+        }
+      }
+    }
+    // If we are are not able to fill up the locationsToRead list,
+    // we did not find enough good locations. Throw TooManyErasedLocations.
+    if (locationsToRead.size() != stripeSize()) {
+      String locationsStr = "";
+      for (Integer erasedLocation: erasedLocations) {
+        locationsStr += " " + erasedLocation;
+      }
+      throw new TooManyErasedLocations("Locations " + locationsStr);
+    }
+    return locationsToRead;
+  }
 
   /**
    * The number of elements in the message.

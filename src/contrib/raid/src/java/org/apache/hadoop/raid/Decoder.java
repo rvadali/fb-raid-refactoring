@@ -21,8 +21,11 @@ package org.apache.hadoop.raid;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -65,6 +68,7 @@ public class Decoder {
     this.rand = new Random();
     this.bufSize = conf.getInt("raid.decoder.bufsize", 1024 * 1024);
     this.writeBufs = new byte[codec.parityLength][];
+    this.readBufs = new byte[codec.parityLength + codec.stripeLength][];
     allocateBuffers();
   }
 
@@ -117,140 +121,184 @@ public class Decoder {
   }
 
   /**
-   * Wraps around fixErasedBlockImpl in order to configure buffers.
    * Having buffers of the right size is extremely important. If the the
    * buffer size is not a divisor of the block size, we may end up reading
    * across block boundaries.
    */
   void fixErasedBlock(
-      FileSystem fs, Path srcFile, FileSystem parityFs, Path parityFile,
+      FileSystem srcFs, Path srcFile, FileSystem parityFs, Path parityFile,
       long blockSize, long errorOffset, long limit,
       OutputStream out, Progressable reporter) throws IOException {
     configureBuffers(blockSize);
-    FSDataInputStream[] inputs = new FSDataInputStream[codec.stripeLength + codec.parityLength];
-    int[] erasedLocations = buildInputs(fs, srcFile, parityFs, parityFile,
-                                        errorOffset, inputs);
-    int blockIdxInStripe = ((int)(errorOffset/blockSize)) % codec.stripeLength;
+
+    int blockIdx = (int) (errorOffset/blockSize);
+    int stripeIdx = blockIdx / codec.stripeLength;
+    int blockIdxInStripe = blockIdx % codec.stripeLength;
     int erasedLocationToFix = codec.parityLength + blockIdxInStripe;
 
-    // Allows network reads to go on while decode is going on.
+    FileStatus srcStat = srcFs.getFileStatus(srcFile);
+    FileStatus parityStat = parityFs.getFileStatus(parityFile);
+
+    InputStream[] inputs = new InputStream[codec.stripeLength + codec.parityLength];
+    List<Integer> erasedLocations = new ArrayList<Integer>();
+    // Start off with one erased location.
+    erasedLocations.add(erasedLocationToFix);
+    List<Integer> locationsToNotRead = new ArrayList<Integer>();
+
     int boundedBufferCapacity = 2;
-    ExecutorService parallelDecoder = Executors.newFixedThreadPool(parallelism);
-    ParallelStreamReader parallelReader = new ParallelStreamReader(
-      reporter, inputs, bufSize, parallelism, boundedBufferCapacity, blockSize);
-    parallelReader.start();
+    ParallelStreamReader parallelReader = null;
+    LOG.info("Need to write " + limit +
+             " bytes for erased location index " + erasedLocationToFix);
     try {
-      writeFixedBlock(inputs, erasedLocations, erasedLocationToFix,
-                      limit, out, reporter, parallelReader);
-    } finally {
-      // Inputs will be closed by parallelReader.shutdown().
-      parallelReader.shutdown();
-      parallelDecoder.shutdownNow();
-    }
+      // Loop while the number of written bytes is less than the max.
+      for (int written = 0; written < limit; ) {
+        try {
+          if (parallelReader == null) {
+            long offsetInBlock = written;
+            buildInputs(srcFs, srcFile, srcStat,
+              parityFs, parityFile, parityStat,
+              stripeIdx, offsetInBlock,
+              inputs, erasedLocations, locationsToNotRead);
+            assert(parallelReader == null);
+            parallelReader = new ParallelStreamReader(reporter, inputs, bufSize,
+              parallelism, boundedBufferCapacity, blockSize);
+            parallelReader.start();
+          }
+          ParallelStreamReader.ReadResult readResult = readFromInputs(
+            erasedLocations, limit, reporter, parallelReader);
+          int[] erased = new int[codec.parityLength];
+          for (int i = 0; i < erased.length; i++) {
+            erased[i] = locationsToNotRead.get(i);
+          }
+          code.decodeBulk(readResult.readBufs, writeBufs, erased);
 
-  }
-
-  protected int[] buildInputs(FileSystem fs, Path srcFile,
-                              FileSystem parityFs, Path parityFile,
-                              long errorOffset, FSDataInputStream[] inputs)
-      throws IOException {
-    LOG.info("Building inputs to recover block starting at " + errorOffset);
-    try {
-      FileStatus srcStat = fs.getFileStatus(srcFile);
-      long blockSize = srcStat.getBlockSize();
-      long blockIdx = (int)(errorOffset / blockSize);
-      long stripeIdx = blockIdx / codec.stripeLength;
-      LOG.info("FileSize = " + srcStat.getLen() + ", blockSize = " + blockSize +
-               ", blockIdx = " + blockIdx + ", stripeIdx = " + stripeIdx);
-      ArrayList<Integer> erasedLocations = new ArrayList<Integer>();
-      // First open streams to the parity blocks.
-      for (int i = 0; i < codec.parityLength; i++) {
-        long offset = blockSize * (stripeIdx * codec.parityLength + i);
-        FSDataInputStream in = parityFs.open(
-          parityFile, conf.getInt("io.file.buffer.size", 64 * 1024));
-        in.seek(offset);
-        LOG.info("Adding " + parityFile + ":" + offset + " as input " + i);
-        inputs[i] = in;
-      }
-      // Now open streams to the data blocks.
-      for (int i = codec.parityLength; i < codec.parityLength + codec.stripeLength; i++) {
-        long offset = blockSize * (stripeIdx * codec.stripeLength + i - codec.parityLength);
-        if (offset == errorOffset) {
-          LOG.info(srcFile + ":" + offset +
-              " is known to have error, adding zeros as input " + i);
-          inputs[i] = new FSDataInputStream(new RaidUtils.ZeroInputStream(
-              offset + blockSize));
-          erasedLocations.add(i);
-        } else if (offset > srcStat.getLen()) {
-          LOG.info(srcFile + ":" + offset +
-                   " is past file size, adding zeros as input " + i);
-          inputs[i] = new FSDataInputStream(new RaidUtils.ZeroInputStream(
-              offset + blockSize));
-        } else {
-          FSDataInputStream in = fs.open(
-            srcFile, conf.getInt("io.file.buffer.size", 64 * 1024));
-          in.seek(offset);
-          LOG.info("Adding " + srcFile + ":" + offset + " as input " + i);
-          inputs[i] = in;
+          int toWrite = (int)Math.min((long)bufSize, limit - written);
+          for (int i = 0; i < erasedLocations.size(); i++) {
+            if (erasedLocations.get(i) == erasedLocationToFix) {
+              out.write(writeBufs[i], 0, toWrite);
+              written += toWrite;
+              break;
+            }
+          }
+        } catch (IOException e) {
+          if (e instanceof TooManyErasedLocations) {
+            throw e;
+          }
+          // Re-create inputs from the new erased locations.
+          if (parallelReader != null) {
+            parallelReader.shutdown();
+            parallelReader = null;
+          }
+          RaidUtils.closeStreams(inputs);
         }
       }
-      if (erasedLocations.size() > codec.parityLength) {
-        String msg = "Too many erased locations: " + erasedLocations.size();
-        LOG.error(msg);
-        throw new IOException(msg);
+    } finally {
+      if (parallelReader != null) {
+        parallelReader.shutdown();
       }
-      int[] locs = new int[erasedLocations.size()];
-      for (int i = 0; i < locs.length; i++) {
-        locs[i] = erasedLocations.get(i);
-      }
-      return locs;
-    } catch (IOException e) {
       RaidUtils.closeStreams(inputs);
-      throw e;
+    }
+  }
+
+  private InputStream buildOneInput(
+    int stripeIndex, int locationIndex, long offsetInBlock,
+    FileSystem srcFs, Path srcFile, FileStatus srcStat,
+    FileSystem parityFs, Path parityFile, FileStatus parityStat
+    ) throws IOException {
+    final long blockSize = srcStat.getBlockSize();
+
+    LOG.info("buildOneInput srcfile " + srcFile + " srclen " + srcStat.getLen() + 
+      " parityfile " + parityFile + " paritylen " + parityStat.getLen() +
+      " stripeindex " + stripeIndex + " locationindex " + locationIndex + " offsetinblock " + offsetInBlock);
+    if (locationIndex < codec.parityLength) {
+      // Dealing with a parity file here.
+      int parityBlockIdx = (codec.parityLength * stripeIndex + locationIndex);
+      long offset = blockSize * parityBlockIdx + offsetInBlock;
+      assert(offset < parityStat.getLen());
+      LOG.info("Opening " + parityFile + ":" + offset +
+        " for location " + locationIndex);
+      FSDataInputStream s = parityFs.open(
+        parityFile, conf.getInt("io.file.buffer.size", 64 * 1024));
+      s.seek(offset);
+      return s;
+    } else {
+      // Dealing with a src file here.
+      int blockIdxInStripe = locationIndex - codec.parityLength;
+      int blockIdx = (codec.stripeLength * stripeIndex + blockIdxInStripe);
+      long offset = blockSize * blockIdx + offsetInBlock;
+      if (offset >= srcStat.getLen()) {
+        LOG.info("Using zeros for " + srcFile + ":" + offset +
+          " for location " + locationIndex);
+        return new RaidUtils.ZeroInputStream(blockSize * (blockIdx + 1));
+      } else {
+        LOG.info("Opening " + srcFile + ":" + offset +
+          " for location " + locationIndex);
+        FSDataInputStream s = srcFs.open(
+            srcFile, conf.getInt("io.file.buffer.size", 64 * 1024));
+        s.seek(offset);
+        return s;
+      }
     }
   }
 
   /**
-   * Decode the inputs provided and write to the output.
-   * @param inputs array of inputs.
-   * @param erasedLocations indexes in the inputs which are known to be erased.
-   * @param erasedLocationToFix index in the inputs which needs to be fixed.
-   * @param limit maximum number of bytes to be written.
-   * @param out the output.
-   * @throws IOException
+   * Builds (codec.stripeLength + codec.parityLength) inputs given some erased locations.
+   * Outputs:
+   *  - the array of input streams @param inputs
+   *  - the list of erased locations @param erasedLocations.
+   *  - the list of locations that are not read @param locationsToNotRead.
    */
-  void writeFixedBlock(
-          FSDataInputStream[] inputs,
-          int[] erasedLocations,
-          int erasedLocationToFix,
-          long limit,
-          OutputStream out,
-          Progressable reporter,
-          ParallelStreamReader parallelReader) throws IOException {
-
-    LOG.info("Need to write " + limit +
-             " bytes for erased location index " + erasedLocationToFix);
-    // Loop while the number of written bytes is less than the max.
-    for (int written = 0; written < limit; ) {
-      erasedLocations = readFromInputs(
-        inputs, erasedLocations, limit, reporter, parallelReader);
-
-      code.decodeBulk(readBufs, writeBufs, erasedLocations);
-
-      int toWrite = (int)Math.min((long)bufSize, limit - written);
-      for (int i = 0; i < erasedLocations.length; i++) {
-        if (erasedLocations[i] == erasedLocationToFix) {
-          out.write(writeBufs[i], 0, toWrite);
-          written += toWrite;
-          break;
+  private void buildInputs(
+    FileSystem srcFs, Path srcFile, FileStatus srcStat,
+    FileSystem parityFs, Path parityFile, FileStatus parityStat,
+    int stripeIdx, long offsetInBlock,
+    InputStream[] inputs, List<Integer> erasedLocations, List<Integer> locationsToNotRead)
+      throws IOException {
+    boolean redo = false;
+    do {
+      locationsToNotRead.clear();
+      List<Integer> locationsToRead =
+        code.locationsToReadForDecode(erasedLocations);
+      for (int i = 0; i < inputs.length; i++) {
+        boolean isErased = (erasedLocations.indexOf(i) != -1);
+        boolean shouldRead = (locationsToRead.indexOf(i) != -1);
+        try {
+          InputStream stm = null;
+          if (isErased || !shouldRead) {
+            if (isErased) {
+              LOG.info("Location " + i + " is erased, using zeros");
+            } else {
+              LOG.info("Location " + i + " need not be read, using zeros");
+            }
+            locationsToNotRead.add(i);
+            stm = new RaidUtils.ZeroInputStream(srcStat.getBlockSize() * (
+              (i < codec.parityLength) ?
+              stripeIdx * codec.parityLength + i :
+              stripeIdx * codec.stripeLength + i - codec.parityLength));
+          } else {
+            stm = buildOneInput(
+              stripeIdx, i, offsetInBlock,
+              srcFs, srcFile, srcStat,
+              parityFs, parityFile, parityStat);
+          }
+          inputs[i] = stm;
+        } catch (IOException e) {
+          if (e instanceof BlockMissingException || e instanceof ChecksumException) {
+            erasedLocations.add(i);
+            redo = true;
+            RaidUtils.closeStreams(inputs);
+            break;
+          } else {
+            throw e;
+          }
         }
       }
-    }
+    } while (redo);
+    assert(new HashSet(locationsToNotRead).size() == codec.parityLength);
   }
 
-  int[] readFromInputs(
-          FSDataInputStream[] inputs,
-          int[] erasedLocations,
+  ParallelStreamReader.ReadResult readFromInputs(
+          List<Integer> erasedLocations,
           long limit,
           Progressable reporter,
           ParallelStreamReader parallelReader) throws IOException {
@@ -262,6 +310,7 @@ public class Decoder {
       throw new IOException("Interrupted while waiting for read result");
     }
 
+    IOException exceptionToThrow = null;
     // Process io errors, we can tolerate upto codec.parityLength errors.
     for (int i = 0; i < readResult.ioExceptions.length; i++) {
       IOException e = readResult.ioExceptions[i];
@@ -275,24 +324,14 @@ public class Decoder {
       } else {
         throw e;
       }
-
-      // Found a new erased location.
-      if (erasedLocations.length == codec.parityLength) {
-        String msg = "Too many read errors";
-        LOG.error(msg);
-        throw new IOException(msg);
-      }
-
-      // Add this stream to the set of erased locations.
-      int[] newErasedLocations = new int[erasedLocations.length + 1];
-      for (int j = 0; j < erasedLocations.length; j++) {
-        newErasedLocations[j] = erasedLocations[j];
-      }
-      newErasedLocations[newErasedLocations.length - 1] = i;
-      erasedLocations = newErasedLocations;
+      int newErasedLocation = i;
+      erasedLocations.add(newErasedLocation);
+      exceptionToThrow = e;
     }
-    readBufs = readResult.readBufs;
-    return erasedLocations;
+    if (exceptionToThrow != null) {
+      throw exceptionToThrow;
+    }
+    return readResult;
   }
 
 }
